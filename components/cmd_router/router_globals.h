@@ -10,11 +10,14 @@
 extern "C" {
 #endif
 
+#include "esp_netif.h" // For esp_netif_t
+
 #define PARAM_NAMESPACE "esp32_nat"
 
 #define PROTO_TCP 6
 #define PROTO_UDP 17
 
+// --- Variables for Admin Config Page ---
 extern char* ssid;
 extern char* ent_username;
 extern char* ent_identity;
@@ -31,6 +34,13 @@ extern bool ap_connect;
 extern uint32_t my_ip;
 extern uint32_t my_ap_ip;
 
+// --- NEW Variables for Portal ---
+extern bool portal_authenticated;
+extern esp_netif_t* wifiAP;
+extern esp_netif_t* wifiSTA;
+
+
+// --- Function Declarations ---
 void preprocess_string(char* str);
 int set_sta(int argc, char **argv);
 int set_sta_static(int argc, char **argv);

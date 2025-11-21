@@ -78,6 +78,8 @@ struct portmap_table_entry {
 };
 struct portmap_table_entry portmap_tab[IP_PORTMAP_MAX];
 
+bool portal_authenticated = false;
+
 esp_netif_t* wifiAP;
 esp_netif_t* wifiSTA;
 
@@ -373,7 +375,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         apply_portmap_tab();
         if (esp_netif_get_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK)
         {
-            esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns);
+            // esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns); // <--- COMMENT OUT
             ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&(dns.ip.u_addr.ip4)));
         }
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
@@ -504,7 +506,9 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     esp_netif_dhcps_option(wifiAP,ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dhcps_dns_value, sizeof(dhcps_dns_value));
 
     // // Set custom dns server address for dhcp server
-    dnsserver.ip.u_addr.ip4.addr = esp_ip4addr_aton(DEFAULT_DNS);
+    ESP_LOGI(TAG, "Setting AP DNS to self (%s) for captive portal hijack.", ap_ip);
+    ESP_LOGI(TAG, "Setting AP DNS to self (%s) for captive portal hijack.", ap_ip);
+    dnsserver.ip.u_addr.ip4.addr = my_ap_ip; // Set DNS to ourself
     dnsserver.ip.type = ESP_IPADDR_TYPE_V4;
     esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dnsserver);
 
@@ -604,7 +608,7 @@ void app_main(void)
     pthread_t t1;
     pthread_create(&t1, NULL, led_status_thread, NULL);
 
-    ip_napt_enable(my_ap_ip, 1);
+  //  ip_napt_enable(my_ap_ip, 1);  // <--- COMMENT OUT THE LINE
     ESP_LOGI(TAG, "NAT is enabled");
 
     char* lock = NULL;
