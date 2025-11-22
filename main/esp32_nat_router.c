@@ -375,7 +375,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         apply_portmap_tab();
         if (esp_netif_get_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK)
         {
-            // esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns); // <--- COMMENT OUT
+            esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns);
             ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&(dns.ip.u_addr.ip4)));
         }
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
@@ -608,7 +608,7 @@ void app_main(void)
     pthread_t t1;
     pthread_create(&t1, NULL, led_status_thread, NULL);
 
-  //  ip_napt_enable(my_ap_ip, 1);  // <--- COMMENT OUT THE LINE
+    ip_napt_enable(my_ap_ip, 1);
     ESP_LOGI(TAG, "NAT is enabled");
 
     char* lock = NULL;
