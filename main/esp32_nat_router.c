@@ -608,8 +608,8 @@ void app_main(void)
     pthread_t t1;
     pthread_create(&t1, NULL, led_status_thread, NULL);
 
-    ip_napt_enable(my_ap_ip, 1);
-    ESP_LOGI(TAG, "NAT is enabled");
+    // NAT is NOT enabled here; it will be enabled when user accepts the captive portal
+    ESP_LOGI(TAG, "NAT will be enabled after user accepts the captive portal");
 
     char* lock = NULL;
     get_config_param_str("lock", &lock);

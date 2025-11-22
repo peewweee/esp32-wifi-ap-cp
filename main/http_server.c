@@ -333,7 +333,7 @@ static esp_err_t portal_handler(httpd_req_t *req)
         "   <input type='checkbox' id='agree' onclick='toggleButton()'>"
         "   <label for='agree'>I agree to the Terms and Conditions.</label>"
         "  </div>"
-        "  <a href='http://localhost:3000' id='connectBtn' class='btn' style='pointer-events: none; opacity: 0.6;'>Start</a>"
+        "  <a href='/accept' id='connectBtn' class='btn' style='pointer-events: none; opacity: 0.6;'>Start</a>"
         " </div>"
         "</body></html>";
 
