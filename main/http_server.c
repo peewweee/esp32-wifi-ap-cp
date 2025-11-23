@@ -228,7 +228,7 @@ static esp_err_t accept_handler(httpd_req_t *req)
 
     // 4. Redirect back to the root page (which will now show the status/timer)
     httpd_resp_set_status(req, "302 Found");
-    httpd_resp_set_hdr(req, "Location", "/");
+    httpd_resp_set_hdr(req, "Location", "/confirm");
     httpd_resp_send(req, NULL, 0);
 
     return ESP_OK;
@@ -380,6 +380,38 @@ static esp_err_t redirect_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t confirm_handler(httpd_req_t *req)
+{
+    const char *resp_str =
+        "<html><head><title>Connected</title>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
+        "<style>"
+        "body {"
+        "  font-family: Inter, Arial, sans-serif;"
+        "  text-align: center;"
+        "  background-color: #F5EFE6;"
+        "  padding: 26.67px;"
+        "}"
+        "img {"
+        "  height: 299.333px;"
+        "  margin-bottom: 12.67px;"
+        "}"
+        "h1 {"
+        "  color: #6F1D1B;"
+        "  font-size: 22.208px;"
+        "  font-weight: 700;"
+        "  margin: 0;"
+        "}"
+        "</style>"
+        "</head><body>"
+        "<img src='/cea.png' />"
+        "<h1>You are now connected to<br>'CPE Wi-Fi'</h1>"
+        "</body></html>";
+
+    httpd_resp_send(req, resp_str, strlen(resp_str));
+    return ESP_OK;
+}
+
 // This is the function called from main.c
 httpd_handle_t start_webserver(void)
 {
@@ -452,6 +484,16 @@ httpd_handle_t start_webserver(void)
         .user_ctx  = NULL
     };
     httpd_register_uri_handler(server, &accept_uri);
+
+    // Handler for the CONFIRMATION page after accepting
+    httpd_uri_t confirm_uri = {
+        .uri       = "/confirm",
+        .method    = HTTP_GET,
+        .handler   = confirm_handler,
+        .user_ctx  = NULL
+    };
+    httpd_register_uri_handler(server, &confirm_uri);
+
 
     // Handler for the ADMIN CONFIG page
     httpd_uri_t admin_uri = {
