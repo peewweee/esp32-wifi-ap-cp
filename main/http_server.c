@@ -439,7 +439,8 @@ static esp_err_t confirm_handler(httpd_req_t *req)
     "  <hr>"
     "  <div class='dash-area'>"
     "    <h2>Explore the dashboard</h2>"
-    "    <a href='/dashboard' class='btn'>Solar-Powered Charging Station</a>"
+    // CHANGED: Redirects to Vercel app. Added target='_blank' to try and force system browser.
+    "    <a href='https://spcs-v1.vercel.app' target='_blank' class='btn'>Solar-Powered Charging Station</a>"
     "    <div class='grid'>"
     "      <img src='/dashboard.png'  class='p-img'/>"
     "      <img src='/dashboard-ui.png' class='d-img'/>"
