@@ -1,10 +1,11 @@
 /*
  * Captive Portal HTTP Server
  *
- * This code intercepts all web traffic from new clients and serves a
- * "login" page. When the user clicks "Accept", it enables NAT
- * and fixes the DNS, granting internet access.
-*/
+ * Flow:
+ * 1. User Connects -> Portal Page (/)
+ * 2. User Clicks Start -> Redirects to /confirm
+ * 3. /confirm -> Enables Internet, Starts Timer, Displays Link to Root PWA
+ */
 #include <stdio.h>
 #include <sys/stat.h>
 #include "esp_spiffs.h"
@@ -19,6 +20,7 @@
     
 // Required for NAT control
 #include "lwip/lwip_napt.h"
+#include "lwip/sockets.h" 
 
 // Your project's global variables
 #include "router_globals.h"
@@ -29,10 +31,25 @@
 static const char *TAG_WEB = "CAPTIVE_PORTAL";
 static const char *TAG_ADMIN = "ADMIN_SERVER";
 
-// --- SESSION VARIABLES ---
-// FIX 1: Added LL to ensure 64-bit calculation
-static const int64_t SESSION_DURATION_US = 1 * 60 * 1000000LL; 
-static int64_t session_end_time = 0;
+// --- SESSION CONFIGURATION ---
+#define MAX_CLIENTS 20
+// TIMER SET TO 60 SECONDS FOR TESTING
+#define SESSION_DURATION_SEC 60 
+#define SESSION_DURATION_US (SESSION_DURATION_SEC * 1000000LL)
+
+// --- PER-DEVICE SESSION STRUCTURE ---
+typedef struct {
+    uint32_t ip_addr;       // The client's IP address
+    int64_t end_time;       // When their session expires (internal ESP time)
+    bool active;            // Is this slot in use?
+} client_session_t;
+
+static client_session_t sessions[MAX_CLIENTS];
+
+// --- FORWARD DECLARATIONS ---
+int get_remaining_seconds(uint32_t ip);
+void start_session(uint32_t ip);
+uint32_t get_client_ip(httpd_req_t *req);
 
 esp_timer_handle_t restart_timer;
 
@@ -48,255 +65,162 @@ esp_timer_create_args_t restart_timer_args = {
         .name = "restart_timer"
 };
 
-char* html_escape(const char* src) {
-    //Primitive html attribue escape, should handle most common issues.
-    int len = strlen(src);
-    //Every char in the string + a null
-    int esc_len = len + 1;
+// --- SESSION MANAGER FUNCTIONS ---
 
-    for (int i = 0; i < len; i++) {
-        if (src[i] == '\\' || src[i] == '\'' || src[i] == '\"' || src[i] == '&' || src[i] == '#' || src[i] == ';') {
-            //Will be replaced with a 5 char sequence
-            esc_len += 4;
+void init_sessions() {
+    for(int i=0; i<MAX_CLIENTS; i++) sessions[i].active = false;
+}
+
+uint32_t get_client_ip(httpd_req_t *req) {
+    int sockfd = httpd_req_to_sockfd(req);
+    struct sockaddr_in addr;
+    socklen_t addr_len = sizeof(addr);
+    if (getpeername(sockfd, (struct sockaddr *)&addr, &addr_len) == 0) {
+        return addr.sin_addr.s_addr;
+    }
+    return 0;
+}
+
+int get_remaining_seconds(uint32_t ip) {
+    int64_t now = esp_timer_get_time();
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (sessions[i].active && sessions[i].ip_addr == ip) {
+            int64_t remaining = sessions[i].end_time - now;
+            if (remaining <= 0) {
+                sessions[i].active = false; 
+                return -1;
+            }
+            return (int)(remaining / 1000000LL);
         }
     }
+    return -1; 
+}
 
+void start_session(uint32_t ip) {
+    int64_t now = esp_timer_get_time();
+    
+    // Check if user already exists
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (sessions[i].active && sessions[i].ip_addr == ip) {
+            // If session exists and has time left, DO NOT reset it.
+            if (sessions[i].end_time > now) {
+                ESP_LOGI(TAG_WEB, "Session exists for IP %lu. Keeping existing time.", ip);
+                return; 
+            }
+            break;
+        }
+    }
+    
+    // Create new session
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (!sessions[i].active) {
+            sessions[i].ip_addr = ip;
+            sessions[i].end_time = now + SESSION_DURATION_US;
+            sessions[i].active = true;
+            ESP_LOGI(TAG_WEB, "Starting NEW session for IP: %lu", ip);
+            return;
+        }
+    }
+    
+    // Fallback: overwrite first slot
+    sessions[0].ip_addr = ip;
+    sessions[0].end_time = now + SESSION_DURATION_US;
+    sessions[0].active = true;
+}
+
+char* html_escape(const char* src) {
+    int len = strlen(src);
+    int esc_len = len + 1;
+    for (int i = 0; i < len; i++) {
+        if (src[i] == '\\' || src[i] == '\'' || src[i] == '\"' || src[i] == '&' || src[i] == '#' || src[i] == ';') esc_len += 4;
+    }
     char* res = malloc(sizeof(char) * esc_len);
-
     int j = 0;
     for (int i = 0; i < len; i++) {
         if (src[i] == '\\' || src[i] == '\'' || src[i] == '\"' || src[i] == '&' || src[i] == '#' || src[i] == ';') {
-            res[j++] = '&';
-            res[j++] = '#';
-            res[j++] = '0' + (src[i] / 10);
-            res[j++] = '0' + (src[i] % 10);
-            res[j++] = ';';
-        }
-        else {
+            res[j++] = '&'; res[j++] = '#'; res[j++] = '0' + (src[i] / 10); res[j++] = '0' + (src[i] % 10); res[j++] = ';';
+        } else {
             res[j++] = src[i];
         }
     }
     res[j] = '\0';
-
     return res;
 }
 
-/* An HTTP GET handler for the Admin Config page */
+/* API Endpoint (Optional fallback) */
+static esp_err_t api_status_handler(httpd_req_t *req)
+{
+    uint32_t ip = get_client_ip(req);
+    int remaining_seconds = get_remaining_seconds(ip);
+    bool is_connected = (remaining_seconds > 0);
+    if (remaining_seconds < 0) remaining_seconds = 0;
+
+    char resp_buf[100]; 
+    snprintf(resp_buf, sizeof(resp_buf), "{\"authenticated\": %s, \"remaining_seconds\": %d}", is_connected ? "true" : "false", remaining_seconds);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*"); 
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, OPTIONS");
+    httpd_resp_send(req, resp_buf, strlen(resp_buf));
+    return ESP_OK;
+}
+
+/* Admin Config Handler */
 static esp_err_t admin_config_handler(httpd_req_t *req)
 {
     char* buf;
     size_t buf_len;
-
-    /* Read URL query string length and allocate memory for length + 1,
-     * extra byte for null termination */
     buf_len = httpd_req_get_url_query_len(req) + 1;
     if (buf_len > 1) {
         buf = malloc(buf_len);
         if (httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
-            ESP_LOGI(TAG_ADMIN, "Found URL query => %s", buf);
-            if (strcmp(buf, "reset=Reboot") == 0) {
-                esp_timer_start_once(restart_timer, 500000);
-            }
-            char param1[64];
-            char param2[64];
-            char param3[64];
-            char param4[64];
-            /* Get value of expected key from query string */
+            if (strcmp(buf, "reset=Reboot") == 0) esp_timer_start_once(restart_timer, 500000);
+            char param1[64]; char param2[64]; 
             if (httpd_query_key_value(buf, "ap_ssid", param1, sizeof(param1)) == ESP_OK) {
-                ESP_LOGI(TAG_ADMIN, "Found URL query parameter => ap_ssid=%s", param1);
                 preprocess_string(param1);
                 if (httpd_query_key_value(buf, "ap_password", param2, sizeof(param2)) == ESP_OK) {
-                    ESP_LOGI(TAG_ADMIN, "Found URL query parameter => ap_password=%s", param2);
                     preprocess_string(param2);
-                    int argc = 3;
-                    char* argv[3];
-                    argv[0] = "set_ap";
-                    argv[1] = param1;
-                    argv[2] = param2;
-                    set_ap(argc, argv);
+                    char* argv[] = {"set_ap", param1, param2};
+                    set_ap(3, argv);
                     esp_timer_start_once(restart_timer, 500000);
                 }
             }
             if (httpd_query_key_value(buf, "ssid", param1, sizeof(param1)) == ESP_OK) {
-                ESP_LOGI(TAG_ADMIN, "Found URL query parameter => ssid=%s", param1);
                 preprocess_string(param1);
                 if (httpd_query_key_value(buf, "password", param2, sizeof(param2)) == ESP_OK) {
-                    ESP_LOGI(TAG_ADMIN, "Found URL query parameter => password=%s", param2);
                     preprocess_string(param2);
-                    if (httpd_query_key_value(buf, "ent_username", param3, sizeof(param3)) == ESP_OK) {
-                        ESP_LOGI(TAG_ADMIN, "Found URL query parameter => ent_username=%s", param3);
-                        preprocess_string(param3);
-                        if (httpd_query_key_value(buf, "ent_identity", param4, sizeof(param4)) == ESP_OK) {
-                            ESP_LOGI(TAG_ADMIN, "Found URL query parameter => ent_identity=%s", param4);
-                            preprocess_string(param4);
-                            int argc = 0;
-                            char* argv[7];
-                            argv[argc++] = "set_sta";
-                            argv[argc++] = param1; //SSID
-                            argv[argc++] = param2; //Password
-                            if(strlen(param2)) { //Username
-                                argv[argc++] = "-u";
-                                argv[argc++] = param3;
-                            }
-                            if(strlen(param3)) { //Identity
-                                argv[argc++] = "-a";
-                                argv[argc++] = param4;
-                            }
-                            set_sta(argc, argv);
-                            esp_timer_start_once(restart_timer, 500000);
-                        }
-                    }
-                }
-            }
-            if (httpd_query_key_value(buf, "staticip", param1, sizeof(param1)) == ESP_OK) {
-                ESP_LOGI(TAG_ADMIN, "Found URL query parameter => staticip=%s", param1);
-                preprocess_string(param1);
-                if (httpd_query_key_value(buf, "subnetmask", param2, sizeof(param2)) == ESP_OK) {
-                    ESP_LOGI(TAG_ADMIN, "Found URL query parameter => subnetmask=%s", param2);
-                    preprocess_string(param2);
-                    if (httpd_query_key_value(buf, "gateway", param3, sizeof(param3)) == ESP_OK) {
-                        ESP_LOGI(TAG_ADMIN, "Found URL query parameter => gateway=%s", param3);
-                        preprocess_string(param3);
-                        int argc = 4;
-                        char* argv[4];
-                        argv[0] = "set_sta_static";
-                        argv[1] = param1;
-                        argv[2] = param2;
-                        argv[3] = param3;
-                        set_sta_static(argc, argv);
-                        esp_timer_start_once(restart_timer, 500000);
-                    }
+                    char* argv[] = {"set_sta", param1, param2, "-u", "", "-a", ""}; 
+                    int argc = 3;
+                    set_sta(argc, argv);
+                    esp_timer_start_once(restart_timer, 500000);
                 }
             }
         }
         free(buf);
     }
-
-    /* Send response with custom headers and body set as the
-     * string passed in user context*/
     const char* resp_str = (const char*) req->user_ctx;
     httpd_resp_send(req, resp_str, strlen(resp_str));
-
     return ESP_OK;
 }
 
-
-// --- HELPER: Check if session is valid ---
-// Returns true if connected, false if expired or not started
-bool check_session_validity() {
-    int64_t current_time = esp_timer_get_time();
-
-    // Case 1: Session never started
-    if (session_end_time == 0) {
-        return false;
-    }
-
-    // Case 2: Session Expired
-    if (current_time > session_end_time) {
-        ESP_LOGI(TAG_WEB, "Session time limit reached. Disconnecting user.");
-        
-        // Disable NAT immediately
-        ip_napt_enable(my_ap_ip, 0);
-        
-        // Reset session
-        session_end_time = 0;
-        portal_authenticated = false; 
-        return false;
-    }
-
-    // Case 3: Session Valid
-    return true;
-}
-
-/*
- * This handler is called when the user clicks "Accept".
- * It enables NAT and fixes the DNS for all clients.
- */
-static esp_err_t accept_handler(httpd_req_t *req)
-{
-    ESP_LOGI(TAG_WEB, "User accepted terms. Starting Session Timer.");
-    
-    // 1. Set the Session End Time
-    session_end_time = esp_timer_get_time() + SESSION_DURATION_US;
-    portal_authenticated = true;
-
-    // 2. ENABLE NAT
-    ip_napt_enable(my_ap_ip, 1);
-
-    // 3. FIX DNS (Push real DNS to clients)
-    esp_netif_dns_info_t dns;
-    if (esp_netif_get_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK) {
-        esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns);
-    }
-
-    // 4. Redirect back to the root page (which will now show the status/timer)
-    httpd_resp_set_status(req, "302 Found");
-    httpd_resp_set_hdr(req, "Location", "/confirm");
-    httpd_resp_send(req, NULL, 0);
-
-    return ESP_OK;
-}
-
-/*
- * This handler serves the main "login" page.
+/* * PORTAL HANDLER (/)
+ * The Login Page.
+ * "Start" Button now links directly to /confirm
  */
 static esp_err_t portal_handler(httpd_req_t *req)
 {
-    // Check if time remains
-    bool is_connected = check_session_validity();
+    // Check if user is already authenticated
+    uint32_t ip = get_client_ip(req);
+    int remaining = get_remaining_seconds(ip);
 
-    if (is_connected) {
-        // --- SHOW STATUS PAGE WITH TIMER ---
-        
-        int64_t remaining_us = session_end_time - esp_timer_get_time();
-        int remaining_seconds = (int)(remaining_us / 1000000);
-        int minutes = remaining_seconds / 60;
-        int seconds = remaining_seconds % 60;
-
-        // FIX 2: Increased buffer from 1024 to 2048 to prevent truncation error
-        char resp_buf[2048];
-        
-        snprintf(resp_buf, sizeof(resp_buf), 
-            "<html><head><title>Status</title>"
-            "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
-            "<meta http-equiv='refresh' content='60'>" // Refresh page every 60s to update server time
-            "<style>"
-            "body { font-family: Arial, sans-serif; background-color: #e8f5e9; text-align: center; padding: 50px; }"
-            ".timer-box { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: inline-block; }"
-            "h1 { color: #2e7d32; }"
-            ".time { font-size: 48px; font-weight: bold; color: #333; }"
-            ".label { font-size: 14px; color: #666; }"
-            "</style>"
-            "<script>"
-            "  // Simple JS countdown for visual smoothness between refreshes\n"
-            "  var secondsLeft = %d;\n"
-            "  function countdown() {\n"
-            "    var m = Math.floor(secondsLeft / 60);\n"
-            "    var s = secondsLeft %% 60;\n" // Note: double % is escape for printf
-            "    if(s < 10) s = '0' + s;\n"
-            "    document.getElementById('timer').innerHTML = m + ':' + s;\n"
-            "    if (secondsLeft > 0) { secondsLeft--; setTimeout(countdown, 1000); }\n"
-            "    else { location.reload(); }\n" // Reload when time is up to trigger disconnect
-            "  }\n"
-            "  window.onload = countdown;\n"
-            "</script>"
-            "</head>"
-            "<body>"
-            "  <div class='timer-box'>"
-            "    <h1>Connected</h1>"
-            "    <p>You have internet access.</p>"
-            "    <div class='time' id='timer'>%d:%02d</div>"
-            "    <div class='label'>Time Remaining</div>"
-            "  </div>"
-            "</body></html>",
-            remaining_seconds, minutes, seconds
-        );
-
-        httpd_resp_send(req, resp_buf, strlen(resp_buf));
+    if (remaining > 0) {
+        // Already logged in? Go to confirm page directly
+        httpd_resp_set_status(req, "302 Found");
+        httpd_resp_set_hdr(req, "Location", "/confirm");
+        httpd_resp_send(req, NULL, 0);
         return ESP_OK;
     }
     
-    // --- SHOW LOGIN PAGE (If not connected) ---
+    // Serve the Login HTML
     const char* resp_str = 
         "<html><head><title>CPE Wi-Fi</title>"
         "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
@@ -336,7 +260,8 @@ static esp_err_t portal_handler(httpd_req_t *req)
         "   <input type='checkbox' id='agree' onclick='toggleButton()'>"
         "   <label for='agree'>I agree to the Terms and Conditions.</label>"
         "  </div>"
-        "  <a href='/accept' id='connectBtn' class='btn' style='pointer-events: none; opacity: 0.6;'>Start</a>"
+        // UPDATED: Link now goes to /confirm directly
+        "  <a href='/confirm' id='connectBtn' class='btn' style='pointer-events: none; opacity: 0.6;'>Start</a>"
         " </div>"
         "</body></html>";
 
@@ -344,31 +269,23 @@ static esp_err_t portal_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-/*
- * This is the CATCH-ALL handler.
- * Any request to any domain (e.g., google.com, cnn.com) will be caught
- * by our DNS hijack and sent to this handler.
- * We redirect them to the main portal page.
+/* * REDIRECT HANDLER
+ * Hijacks DNS checks and sends to Portal (/) if not authenticated.
+ * If authenticated, sends 404 to satisfy OS "Connectivity Check".
  */
 static esp_err_t redirect_handler(httpd_req_t *req)
 {
-    // CRITICAL: Check if the time ran out while they were browsing
-    bool is_connected = check_session_validity();
+    uint32_t ip = get_client_ip(req);
+    int remaining = get_remaining_seconds(ip);
 
-    if (is_connected) {
-        // If they are connected, we usually want to return 404 for random requests
-        // so their browser stops trying to hijack.
-        // OR, we can redirect them to the status page if they type a random URL.
-        ESP_LOGW(TAG_WEB, "Already authed. Sending 404 for %s", req->uri);
+    if (remaining > 0) {
+        // Authenticated. Return 404 to stop Captive Portal popup from hanging around.
         httpd_resp_send_404(req);
         return ESP_OK;
     }
 
-    ESP_LOGI(TAG_WEB, "Redirecting request for '%s' to portal", req->uri);
-
+    // Not authenticated. Redirect to Portal IP.
     httpd_resp_set_status(req, "302 Found");
-    
-    // Get the AP's IP to redirect correctly
     esp_netif_ip_info_t ip_info;
     esp_netif_get_ip_info(wifiAP, &ip_info);
     char ip_str[16];
@@ -376,276 +293,153 @@ static esp_err_t redirect_handler(httpd_req_t *req)
     
     char redirect_url[64];
     snprintf(redirect_url, sizeof(redirect_url), "http://%s", ip_str);
-    
     httpd_resp_set_hdr(req, "Location", redirect_url);
     httpd_resp_send(req, NULL, 0);
 
     return ESP_OK;
 }
 
+/* * CONFIRM HANDLER (/confirm)
+ * 1. Enables Internet & Starts Timer (if not already started)
+ * 2. Shows "You are connected"
+ * 3. Generates the button that passes the timer data to Vercel
+ */
 static esp_err_t confirm_handler(httpd_req_t *req)
 {
-    const char *resp_str =
+    uint32_t ip = get_client_ip(req);
+    
+    // --- START THE INTERNET HERE ---
+    start_session(ip); // Starts session or keeps existing one
+    
+    ip_napt_enable(my_ap_ip, 1);
+    
+    esp_netif_dns_info_t dns;
+    if (esp_netif_get_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK) {
+        esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns);
+    }
+    // -------------------------------
+
+    int remaining_seconds = get_remaining_seconds(ip);
+    if (remaining_seconds < 0) remaining_seconds = 0;
+
+    ESP_LOGI(TAG_WEB, "Confirm Page. IP: %lu, Remaining: %d", ip, remaining_seconds);
+
+    char *resp_str = malloc(4096); 
+    if (resp_str == NULL) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    snprintf(resp_str, 4096,
     "<!DOCTYPE html><html><head><title>Connected to CPE Wi-Fi</title>"
     "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
     "<style>"
-    "body {"
-    "  font-family: Inter, sans-serif;"
-    "  text-align: center;"
-    "  background-color: #F5EFE6;"
-    "  margin: 0; padding: 0;"
-    "  color: #4A3B32;"
-    "}"
-    ".container {"
-    "  max-width: 600px; margin: 0 auto; padding: 0 20px 40px 20px;"
-    "}"
-    ".hero {"
-    "  width: 100%; display: block; margin-bottom: 10px;"
-    "  mask-image: linear-gradient(to bottom, black 60%, transparent 100%);"
-    "  -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);"
-    "}"
-    "h1 {"
-    "  color: #6F1D1B; font-size: 24px; font-weight: 400; margin: 0;"
-    "}"
-    "h1 b {"
-    "  font-weight: 700; display: block;"
-    "}"
-    "hr {"
-    "  border: 0; height: 1px; background-color: #E0D8D0; margin: 30px 0;"
-    "}"
+    "body { font-family: Inter, sans-serif; text-align: center; background-color: #F5EFE6; margin: 0; padding: 0; color: #4A3B32; }"
+    ".container { max-width: 600px; margin: 0 auto; padding: 0 20px 40px 20px; }"
+    ".hero { width: 100%%; display: block; margin-bottom: 10px; mask-image: linear-gradient(to bottom, black 60%%, transparent 100%%); -webkit-mask-image: linear-gradient(to bottom, black 60%%, transparent 100%%); }"
+    "h1 { color: #6F1D1B; font-size: 24px; font-weight: 400; margin: 0; }"
+    "h1 b { font-weight: 700; display: block; }"
+    "hr { border: 0; height: 1px; background-color: #E0D8D0; margin: 30px 0; }"
     ".dash-area { text-align: left; }"
     "h2 { font-size: 18px; font-weight: 700; margin-bottom: 10px; }"
-    ".btn {"
-    "  display: inline-block; background-color: #1A1A1A; color: white;"
-    "  text-decoration: none; padding: 10px 15px;"
-    "  border-radius: 8px; font-weight: 600; margin-bottom: 20px;"
-    "}"
-    ".grid {"
-    "  display: flex; gap: 10px; justify-content: center; align-items: flex-start;"
-    "}"
-    ".grid img {"
-    "  max-width: 100%; border-radius: 12px;"
-    "  box-shadow: 0 4px 10px rgba(0,0,0,0.1);"
-    "}"
-    ".p-img { width: 45%; }"
-    ".d-img { width: 50%; margin-top: 40px; }"
+    ".btn { display: inline-block; background-color: #1A1A1A; color: white; text-decoration: none; padding: 10px 15px; border-radius: 8px; font-weight: 600; margin-bottom: 20px; }"
+    ".grid { display: flex; gap: 10px; justify-content: center; align-items: flex-start; }"
+    ".grid img { max-width: 100%%; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }"
+    ".p-img { width: 45%%; }"
+    ".d-img { width: 50%%; margin-top: 40px; }"
     "</style>"
     "</head><body>"
-    
     "<img src='/cea.png' class='hero' />"
-    
     "<div class='container'>"
     "  <h1>You are now connected to<br><b>'CPE Wi-Fi'</b></h1>"
     "  <hr>"
     "  <div class='dash-area'>"
     "    <h2>Explore the dashboard</h2>"
-    "    <a href='/dashboard' class='btn'>Solar-Powered Charging Station</a>"
+    // UPDATED: Points to Root (https://spcs-v1.vercel.app) with Params
+    "    <a href='https://spcs-v1.vercel.app?connected=true&seconds=%d' target='_blank' class='btn'>Solar-Powered Charging Station</a>"
     "    <div class='grid'>"
     "      <img src='/dashboard.png'  class='p-img'/>"
     "      <img src='/dashboard-ui.png' class='d-img'/>"
     "    </div>"
     "  </div>"
     "</div>"
-    "</body></html>";
+    "</body></html>",
+    remaining_seconds // This integer replaces the %d in the URL above
+    );
 
     httpd_resp_send(req, resp_str, strlen(resp_str));
+    free(resp_str);
     return ESP_OK;
 }
 
-/* Generic Handler to serve ANY image requested */
+/* Image Handler */
 static esp_err_t img_handler(httpd_req_t *req)
 {
-    // FIX: Increase buffer size from 64 to 600 to satisfy the compiler
-    // (512 is the max URI length + "/spiffs" + null terminator)
     char filepath[600]; 
-    
-    // This line will now pass compilation because filepath is big enough
     snprintf(filepath, sizeof(filepath), "/spiffs%s", req->uri);
-
-    ESP_LOGI(TAG_WEB, "Opening file: %s", filepath);
-
     FILE *f = fopen(filepath, "r");
-    if (f == NULL) {
-        ESP_LOGE(TAG_WEB, "Failed to open file: %s", filepath);
-        httpd_resp_send_404(req);
-        return ESP_FAIL;
-    }
+    if (f == NULL) { httpd_resp_send_404(req); return ESP_FAIL; }
+    
+    if (strstr(req->uri, ".jpg") || strstr(req->uri, ".jpeg")) httpd_resp_set_type(req, "image/jpeg");
+    else httpd_resp_set_type(req, "image/png");
 
-    // Determine type (optional but good practice)
-    if (strstr(req->uri, ".jpg") || strstr(req->uri, ".jpeg")) {
-        httpd_resp_set_type(req, "image/jpeg");
-    } else {
-        httpd_resp_set_type(req, "image/png");
-    }
-
-    char chunk[1024];
-    size_t chunksize;
+    char chunk[1024]; size_t chunksize;
     while ((chunksize = fread(chunk, 1, sizeof(chunk), f)) > 0) {
-        if (httpd_resp_send_chunk(req, chunk, chunksize) != ESP_OK) {
-            fclose(f);
-            return ESP_FAIL;
-        }
+        if (httpd_resp_send_chunk(req, chunk, chunksize) != ESP_OK) { fclose(f); return ESP_FAIL; }
     }
-
     httpd_resp_send_chunk(req, NULL, 0);
     fclose(f);
     return ESP_OK;
 }
 
-// This is the function called from main.c
 httpd_handle_t start_webserver(void)
 {
+    init_sessions();
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 15; // We need more handlers now
-    config.stack_size = 8192;     // Increase stack size
-
-    // Create the restart timer (for the admin page)
+    config.max_uri_handlers = 15;
+    config.stack_size = 8192;
     esp_timer_create(&restart_timer_args, &restart_timer);
 
-    // --- Build the Admin Config Page HTML ---
-    // This is the logic from your old http_server.c
     const char* config_page_template = CONFIG_PAGE;
-    char* safe_ap_ssid = html_escape(ap_ssid);
-    char* safe_ap_passwd = html_escape(ap_passwd);
-    char* safe_ssid = html_escape(ssid);
-    char* safe_passwd = html_escape(passwd);
-    char* safe_ent_username = html_escape(ent_username);
-    char* safe_ent_identity = html_escape(ent_identity);
-
-    int page_len =
-        strlen(config_page_template) +
-        strlen(safe_ap_ssid) +
-        strlen(safe_ap_passwd) +
-        strlen(safe_ssid) +
-        strlen(safe_passwd) +
-        strlen(safe_ent_username) +
-        strlen(safe_ent_identity) +
-        256;
+    char* safe_ap_ssid = html_escape(ap_ssid); char* safe_ap_passwd = html_escape(ap_passwd);
+    char* safe_ssid = html_escape(ssid); char* safe_passwd = html_escape(passwd);
+    char* safe_ent_username = html_escape(ent_username); char* safe_ent_identity = html_escape(ent_identity);
+    int page_len = strlen(config_page_template) + strlen(safe_ap_ssid) + strlen(safe_ap_passwd) + 
+                   strlen(safe_ssid) + strlen(safe_passwd) + strlen(safe_ent_username) + 
+                   strlen(safe_ent_identity) + 256;
     char* config_page = malloc(sizeof(char) * page_len);
+    snprintf(config_page, page_len, config_page_template,
+        safe_ap_ssid, safe_ap_passwd, safe_ssid, safe_passwd, safe_ent_username, safe_ent_identity,
+        static_ip, subnet_mask, gateway_addr);
+    free(safe_ap_ssid); free(safe_ap_passwd); free(safe_ssid);
+    free(safe_passwd); free(safe_ent_username); free(safe_ent_identity);
 
-    snprintf(
-        config_page, page_len, config_page_template,
-        safe_ap_ssid, safe_ap_passwd,
-        safe_ssid, safe_passwd, safe_ent_username, safe_ent_identity,
-            static_ip, subnet_mask, gateway_addr);
-    
-    free(safe_ap_ssid);
-    free(safe_ap_passwd);
-    free(safe_ssid);
-    free(safe_passwd);
-    free(safe_ent_username);
-    free(safe_ent_identity);
-    // --- End of Admin Page Build ---
+    if (httpd_start(&server, &config) != ESP_OK) return NULL;
 
-
-    ESP_LOGI(TAG_WEB, "Starting web server for portal and config");
-    if (httpd_start(&server, &config) != ESP_OK) {
-        ESP_LOGE(TAG_WEB, "Failed to start web server");
-        return NULL;
-    }
-
-    // --- Register ALL Specific Handlers FIRST ---
-
-    // Handler for the GUEST PORTAL main page
-    httpd_uri_t portal_uri = {
-        .uri       = "/",
-        .method    = HTTP_GET,
-        .handler   = portal_handler,
-        .user_ctx  = NULL
-    };
+    httpd_uri_t api_status_uri = { .uri = "/api/status", .method = HTTP_GET, .handler = api_status_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &api_status_uri);
+    httpd_uri_t portal_uri = { .uri = "/", .method = HTTP_GET, .handler = portal_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &portal_uri);
-
-    // Handler for the GUEST "Accept" button
-    httpd_uri_t accept_uri = {
-        .uri       = "/accept",
-        .method    = HTTP_GET,
-        .handler   = accept_handler,
-        .user_ctx  = NULL
-    };
-    httpd_register_uri_handler(server, &accept_uri);
-
-    // Handler for the CONFIRMATION page after accepting
-    httpd_uri_t confirm_uri = {
-        .uri       = "/confirm",
-        .method    = HTTP_GET,
-        .handler   = confirm_handler,
-        .user_ctx  = NULL
-    };
-    httpd_register_uri_handler(server, &confirm_uri);
-
-
-    // Handler for the ADMIN CONFIG page
-    httpd_uri_t admin_uri = {
-        .uri       = "/config",
-        .method    = HTTP_GET,
-        .handler   = admin_config_handler,
-        .user_ctx  = config_page // Pass the generated HTML to the handler
-    };
-    httpd_register_uri_handler(server, &admin_uri);
-
-
-    // --- Special Handlers for OS connectivity checks ---
-    httpd_uri_t gen_204_uri = {
-        .uri       = "/generate_204",
-        .method    = HTTP_GET,
-        .handler   = redirect_handler,
-        .user_ctx  = NULL
-    };
-    httpd_register_uri_handler(server, &gen_204_uri);
-
-    httpd_uri_t connectivity_check_uri = {
-        .uri       = "/connectivity-check.html",
-        .method    = HTTP_GET,
-        .handler   = redirect_handler,
-        .user_ctx  = NULL
-    };
-    httpd_register_uri_handler(server, &connectivity_check_uri);
-
-    httpd_uri_t hotspot_uri = {
-        .uri       = "/hotspot-detect.html",
-        .method    = HTTP_GET,
-        .handler   = redirect_handler,
-        .user_ctx  = NULL
-    };
-    httpd_register_uri_handler(server, &hotspot_uri);
-// 1. URI for the Building
-httpd_uri_t cea_uri = {
-    .uri       = "/cea.png",
-    .method    = HTTP_GET,
-    .handler   = img_handler, // Use the generic handler
-    .user_ctx  = NULL
-};
-httpd_register_uri_handler(server, &cea_uri);
-
-// 2. URI for the Phone Mockup
-httpd_uri_t phone_uri = {
-    .uri       = "/dashboard.png", 
-    .method    = HTTP_GET,
-    .handler   = img_handler, // Use the SAME handler
-    .user_ctx  = NULL
-};
-httpd_register_uri_handler(server, &phone_uri);
-
-// 3. URI for the Dashboard Screenshot
-httpd_uri_t dash_uri = {
-    .uri       = "/dashboard-ui.png",
-    .method    = HTTP_GET,
-    .handler   = img_handler, // Use the SAME handler
-    .user_ctx  = NULL
-};
-httpd_register_uri_handler(server, &dash_uri);
     
-    // --- CATCH-ALL Handler ---
-    // This MUST be registered last
-    httpd_uri_t catch_all_uri = {
-        .uri       = "/*", // Wildcard
-        .method    = HTTP_GET,
-        .handler   = redirect_handler,
-        .user_ctx  = NULL
-    };
+    httpd_uri_t confirm_uri = { .uri = "/confirm", .method = HTTP_GET, .handler = confirm_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &confirm_uri);
+    httpd_uri_t admin_uri = { .uri = "/config", .method = HTTP_GET, .handler = admin_config_handler, .user_ctx = config_page };
+    httpd_register_uri_handler(server, &admin_uri);
+    httpd_uri_t gen_204_uri = { .uri = "/generate_204", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &gen_204_uri);
+    httpd_uri_t connectivity_check_uri = { .uri = "/connectivity-check.html", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &connectivity_check_uri);
+    httpd_uri_t hotspot_uri = { .uri = "/hotspot-detect.html", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &hotspot_uri);
+    httpd_uri_t cea_uri = { .uri = "/cea.png", .method = HTTP_GET, .handler = img_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &cea_uri);
+    httpd_uri_t phone_uri = { .uri = "/dashboard.png", .method = HTTP_GET, .handler = img_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &phone_uri);
+    httpd_uri_t dash_uri = { .uri = "/dashboard-ui.png", .method = HTTP_GET, .handler = img_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &dash_uri);
+    httpd_uri_t catch_all_uri = { .uri = "/*", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &catch_all_uri);
 
-    ESP_LOGI(TAG_WEB, "Web server started with ALL handlers.");
     return server;
 }
