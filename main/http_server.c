@@ -5,6 +5,9 @@
  * "login" page. When the user clicks "Accept", it enables NAT
  * and fixes the DNS, granting internet access.
 */
+#include <stdio.h>
+#include <sys/stat.h>
+#include "esp_spiffs.h"
 
 #include <esp_wifi.h>
 #include <esp_event.h>
@@ -228,7 +231,7 @@ static esp_err_t accept_handler(httpd_req_t *req)
 
     // 4. Redirect back to the root page (which will now show the status/timer)
     httpd_resp_set_status(req, "302 Found");
-    httpd_resp_set_hdr(req, "Location", "/");
+    httpd_resp_set_hdr(req, "Location", "/confirm");
     httpd_resp_send(req, NULL, 0);
 
     return ESP_OK;
@@ -333,7 +336,7 @@ static esp_err_t portal_handler(httpd_req_t *req)
         "   <input type='checkbox' id='agree' onclick='toggleButton()'>"
         "   <label for='agree'>I agree to the Terms and Conditions.</label>"
         "  </div>"
-        "  <a href='http://localhost:3000' id='connectBtn' class='btn' style='pointer-events: none; opacity: 0.6;'>Start</a>"
+        "  <a href='/accept' id='connectBtn' class='btn' style='pointer-events: none; opacity: 0.6;'>Start</a>"
         " </div>"
         "</body></html>";
 
@@ -377,6 +380,115 @@ static esp_err_t redirect_handler(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Location", redirect_url);
     httpd_resp_send(req, NULL, 0);
 
+    return ESP_OK;
+}
+
+static esp_err_t confirm_handler(httpd_req_t *req)
+{
+    const char *resp_str =
+    "<!DOCTYPE html><html><head><title>Connected to CPE Wi-Fi</title>"
+    "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
+    "<style>"
+    "body {"
+    "  font-family: Inter, sans-serif;"
+    "  text-align: center;"
+    "  background-color: #F5EFE6;"
+    "  margin: 0; padding: 0;"
+    "  color: #4A3B32;"
+    "}"
+    ".container {"
+    "  max-width: 600px; margin: 0 auto; padding: 0 20px 40px 20px;"
+    "}"
+    ".hero {"
+    "  width: 100%; display: block; margin-bottom: 10px;"
+    "  mask-image: linear-gradient(to bottom, black 60%, transparent 100%);"
+    "  -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);"
+    "}"
+    "h1 {"
+    "  color: #6F1D1B; font-size: 24px; font-weight: 400; margin: 0;"
+    "}"
+    "h1 b {"
+    "  font-weight: 700; display: block;"
+    "}"
+    "hr {"
+    "  border: 0; height: 1px; background-color: #E0D8D0; margin: 30px 0;"
+    "}"
+    ".dash-area { text-align: left; }"
+    "h2 { font-size: 18px; font-weight: 700; margin-bottom: 10px; }"
+    ".btn {"
+    "  display: inline-block; background-color: #1A1A1A; color: white;"
+    "  text-decoration: none; padding: 10px 15px;"
+    "  border-radius: 8px; font-weight: 600; margin-bottom: 20px;"
+    "}"
+    ".grid {"
+    "  display: flex; gap: 10px; justify-content: center; align-items: flex-start;"
+    "}"
+    ".grid img {"
+    "  max-width: 100%; border-radius: 12px;"
+    "  box-shadow: 0 4px 10px rgba(0,0,0,0.1);"
+    "}"
+    ".p-img { width: 45%; }"
+    ".d-img { width: 50%; margin-top: 40px; }"
+    "</style>"
+    "</head><body>"
+    
+    "<img src='/cea.png' class='hero' />"
+    
+    "<div class='container'>"
+    "  <h1>You are now connected to<br><b>'CPE Wi-Fi'</b></h1>"
+    "  <hr>"
+    "  <div class='dash-area'>"
+    "    <h2>Explore the dashboard</h2>"
+    "    <a href='/dashboard' class='btn'>Solar-Powered Charging Station</a>"
+    "    <div class='grid'>"
+    "      <img src='/dashboard.png'  class='p-img'/>"
+    "      <img src='/dashboard-ui.png' class='d-img'/>"
+    "    </div>"
+    "  </div>"
+    "</div>"
+    "</body></html>";
+
+    httpd_resp_send(req, resp_str, strlen(resp_str));
+    return ESP_OK;
+}
+
+/* Generic Handler to serve ANY image requested */
+static esp_err_t img_handler(httpd_req_t *req)
+{
+    // FIX: Increase buffer size from 64 to 600 to satisfy the compiler
+    // (512 is the max URI length + "/spiffs" + null terminator)
+    char filepath[600]; 
+    
+    // This line will now pass compilation because filepath is big enough
+    snprintf(filepath, sizeof(filepath), "/spiffs%s", req->uri);
+
+    ESP_LOGI(TAG_WEB, "Opening file: %s", filepath);
+
+    FILE *f = fopen(filepath, "r");
+    if (f == NULL) {
+        ESP_LOGE(TAG_WEB, "Failed to open file: %s", filepath);
+        httpd_resp_send_404(req);
+        return ESP_FAIL;
+    }
+
+    // Determine type (optional but good practice)
+    if (strstr(req->uri, ".jpg") || strstr(req->uri, ".jpeg")) {
+        httpd_resp_set_type(req, "image/jpeg");
+    } else {
+        httpd_resp_set_type(req, "image/png");
+    }
+
+    char chunk[1024];
+    size_t chunksize;
+    while ((chunksize = fread(chunk, 1, sizeof(chunk), f)) > 0) {
+        if (httpd_resp_send_chunk(req, chunk, chunksize) != ESP_OK) {
+            fclose(f);
+            return ESP_FAIL;
+        }
+    }
+
+    httpd_resp_send_chunk(req, NULL, 0);
+    fclose(f);
     return ESP_OK;
 }
 
@@ -453,6 +565,16 @@ httpd_handle_t start_webserver(void)
     };
     httpd_register_uri_handler(server, &accept_uri);
 
+    // Handler for the CONFIRMATION page after accepting
+    httpd_uri_t confirm_uri = {
+        .uri       = "/confirm",
+        .method    = HTTP_GET,
+        .handler   = confirm_handler,
+        .user_ctx  = NULL
+    };
+    httpd_register_uri_handler(server, &confirm_uri);
+
+
     // Handler for the ADMIN CONFIG page
     httpd_uri_t admin_uri = {
         .uri       = "/config",
@@ -487,6 +609,32 @@ httpd_handle_t start_webserver(void)
         .user_ctx  = NULL
     };
     httpd_register_uri_handler(server, &hotspot_uri);
+// 1. URI for the Building
+httpd_uri_t cea_uri = {
+    .uri       = "/cea.png",
+    .method    = HTTP_GET,
+    .handler   = img_handler, // Use the generic handler
+    .user_ctx  = NULL
+};
+httpd_register_uri_handler(server, &cea_uri);
+
+// 2. URI for the Phone Mockup
+httpd_uri_t phone_uri = {
+    .uri       = "/dashboard.png", 
+    .method    = HTTP_GET,
+    .handler   = img_handler, // Use the SAME handler
+    .user_ctx  = NULL
+};
+httpd_register_uri_handler(server, &phone_uri);
+
+// 3. URI for the Dashboard Screenshot
+httpd_uri_t dash_uri = {
+    .uri       = "/dashboard-ui.png",
+    .method    = HTTP_GET,
+    .handler   = img_handler, // Use the SAME handler
+    .user_ctx  = NULL
+};
+httpd_register_uri_handler(server, &dash_uri);
     
     // --- CATCH-ALL Handler ---
     // This MUST be registered last
