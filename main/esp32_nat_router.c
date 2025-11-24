@@ -7,6 +7,8 @@
    CONDITIONS OF ANY KIND, either express or implied.
 */
 
+#include "esp_spiffs.h"
+
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
@@ -87,30 +89,6 @@ httpd_handle_t start_webserver(void);
 
 static const char *TAG = "ESP32 NAT router";
 
-/* Console command history can be stored to and loaded from a file.
- * The easiest way to do this is to use FATFS filesystem on top of
- * wear_levelling library.
- */
-#if CONFIG_STORE_HISTORY
-
-#define MOUNT_PATH "/data"
-#define HISTORY_PATH MOUNT_PATH "/history.txt"
-
-static void initialize_filesystem(void)
-{
-    static wl_handle_t wl_handle;
-    const esp_vfs_fat_mount_config_t mount_config = {
-            .max_files = 4,
-            .format_if_mount_failed = true
-    };
-    esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl(MOUNT_PATH, "storage", &mount_config, &wl_handle);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to mount FATFS (%s)", esp_err_to_name(err));
-        return;
-    }
-}
-#endif // CONFIG_STORE_HISTORY
-
 static void initialize_nvs(void)
 {
     esp_err_t err = nvs_flash_init();
@@ -121,6 +99,38 @@ static void initialize_nvs(void)
     ESP_ERROR_CHECK(err);
 }
 
+void init_spiffs(void) {
+    ESP_LOGI(TAG, "Initializing SPIFFS");
+    
+    esp_vfs_spiffs_conf_t conf = {
+      .base_path = "/spiffs",
+      .partition_label = "storage", // This matches your partitions.csv name
+      .max_files = 5,
+      .format_if_mount_failed = false // Do NOT format, or you lose the image!
+    };
+
+    esp_err_t ret = esp_vfs_spiffs_register(&conf);
+
+    if (ret != ESP_OK) {
+        if (ret == ESP_FAIL) {
+            ESP_LOGE(TAG, "Failed to mount or format filesystem");
+        } else if (ret == ESP_ERR_NOT_FOUND) {
+            ESP_LOGE(TAG, "Failed to find SPIFFS partition");
+        } else {
+            ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+        }
+        return;
+    }
+    
+    size_t total = 0, used = 0;
+    ret = esp_spiffs_info("storage", &total, &used);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get SPIFFS partition information");
+    } else {
+        ESP_LOGI(TAG, "Partition size: total: %d, used: %d", total, used);
+    }
+}
+// -----------------------
 esp_err_t apply_portmap_tab() {
     for (int i = 0; i<IP_PORTMAP_MAX; i++) {
         if (portmap_tab[i].valid) {
@@ -321,10 +331,6 @@ static void initialize_console(void)
     /* Set command history size */
     linenoiseHistorySetMaxLen(100);
 
-#if CONFIG_STORE_HISTORY
-    /* Load command history from filesystem */
-    linenoiseHistoryLoad(HISTORY_PATH);
-#endif
 }
 
 void * led_status_thread(void * p)
@@ -550,12 +556,8 @@ void app_main(void)
 {
     initialize_nvs();
 
-#if CONFIG_STORE_HISTORY
-    initialize_filesystem();
-    ESP_LOGI(TAG, "Command history enabled");
-#else
-    ESP_LOGI(TAG, "Command history disabled");
-#endif
+    // Initialize SPIFFS for the Logo
+    init_spiffs();
 
     get_config_param_blob("mac", &mac, 6);
     get_config_param_str("ssid", &ssid);
@@ -674,10 +676,6 @@ void app_main(void)
         }
         /* Add the command to the history */
         linenoiseHistoryAdd(line);
-#if CONFIG_STORE_HISTORY
-        /* Save command history to filesystem */
-        linenoiseHistorySave(HISTORY_PATH);
-#endif
 
         /* Try to run the command */
         int ret;
