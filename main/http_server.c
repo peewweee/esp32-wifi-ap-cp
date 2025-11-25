@@ -17,6 +17,11 @@
 #include <sys/param.h>
 #include "esp_netif.h"
 #include <esp_http_server.h>
+
+#include "freertos/FreeRTOS.h" // Required for the background task
+#include "freertos/task.h"
+#include "lwip/etharp.h"       // Required to find MAC address from IP
+#include "lwip/netif.h"
     
 // Required for NAT control
 #include "lwip/lwip_napt.h"
@@ -213,12 +218,13 @@ static esp_err_t portal_handler(httpd_req_t *req)
     int remaining = get_remaining_seconds(ip);
 
     if (remaining > 0) {
-        // Already logged in? Go to confirm page directly
-        httpd_resp_set_status(req, "302 Found");
-        httpd_resp_set_hdr(req, "Location", "/confirm");
-        httpd_resp_send(req, NULL, 0);
-        return ESP_OK;
+    // If time remains, let the OS think it has internet (Send 404 to satisfy connectivity checks)
+    httpd_resp_send_404(req);
+    return ESP_OK;
     }
+
+    // If time is up (remaining <= 0), HIJACK the request and send them to the portal
+    httpd_resp_set_status(req, "302 Found");
     
     // Serve the Login HTML
     const char* resp_str = 
@@ -392,9 +398,42 @@ static esp_err_t img_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// --- BACKGROUND TASK TO EXPIRE SESSIONS ---
+void session_watcher_task(void *pvParameters) {
+    ESP_LOGI(TAG_WEB, "Session Watcher Task Started");
+    
+    while (1) {
+        int64_t now = esp_timer_get_time();
+        
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            // Check if session is active AND time has expired
+            if (sessions[i].active && sessions[i].end_time <= now) {
+                
+                uint32_t target_ip = sessions[i].ip_addr;
+                
+                ESP_LOGW(TAG_WEB, "Session expired for IP: %lu. Cutting Internet...", target_ip);
+
+                // --- THE FIX: PHYSICALLY DISABLE NAT ROUTING ---
+                // This stops the packets from flowing from WiFi AP to WiFi STA
+                ip_napt_enable(my_ap_ip, 0); 
+                // -----------------------------------------------
+
+                // Mark session as inactive (blocks them from re-enabling without login)
+                sessions[i].active = false;
+            }
+        }
+        
+        // Run this check every 1 second
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
 httpd_handle_t start_webserver(void)
 {
     init_sessions();
+
+    xTaskCreate(session_watcher_task, "session_watcher", 4096, NULL, 5, NULL);
+    // Stack size 4096 is usually sufficient for WiFi operations
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 15;
