@@ -27,9 +27,15 @@
 
 #include "pages.h"
 #include "esp_timer.h"
+#include "mbedtls/base64.h" // Required for decoding the password
 
 static const char *TAG_WEB = "CAPTIVE_PORTAL";
 static const char *TAG_ADMIN = "ADMIN_SERVER";
+
+// --- ADMIN CREDENTIALS ---
+#define ADMIN_USERNAME "admin"
+#define ADMIN_PASSWORD "admin123"
+#define AUTH_REALM "Admin Configuration"
 
 // --- SESSION CONFIGURATION ---
 #define MAX_CLIENTS 20
@@ -163,10 +169,80 @@ static esp_err_t api_status_handler(httpd_req_t *req)
     httpd_resp_send(req, resp_buf, strlen(resp_buf));
     return ESP_OK;
 }
+// --- INSERT THIS HELPER FUNCTION HERE ---
+typedef enum {
+    AUTH_OK = 0,
+    AUTH_MISSING = 1,
+    AUTH_WRONG = 2
+} auth_status_t;
+
+static auth_status_t check_auth(httpd_req_t *req) {
+    char *buf = NULL;
+    size_t buf_len = 0;
+    
+    buf_len = httpd_req_get_hdr_value_len(req, "Authorization") + 1;
+    if (buf_len <= 1) return AUTH_MISSING;
+
+    buf = malloc(buf_len);
+    if (!buf) return AUTH_MISSING;
+    
+    if (httpd_req_get_hdr_value_str(req, "Authorization", buf, buf_len) != ESP_OK) {
+        free(buf);
+        return AUTH_MISSING;
+    }
+
+    if (strncmp(buf, "Basic ", 6) != 0) {
+        free(buf);
+        return AUTH_MISSING;
+    }
+
+    char *encoded = buf + 6; 
+    unsigned char decoded[64]; 
+    size_t decoded_len = 0;
+    
+    mbedtls_base64_decode(decoded, sizeof(decoded), &decoded_len, 
+                         (const unsigned char *)encoded, strlen(encoded));
+    decoded[decoded_len] = '\0'; 
+    free(buf); 
+
+    char expected[64];
+    snprintf(expected, sizeof(expected), "%s:%s", ADMIN_USERNAME, ADMIN_PASSWORD);
+
+    if (strcmp((char *)decoded, expected) == 0) return AUTH_OK;
+
+    return AUTH_WRONG;
+}
+// ----------------------------------------
 
 /* Admin Config Handler */
 static esp_err_t admin_config_handler(httpd_req_t *req)
 {
+    // --- AUTHENTICATION CHECK ---
+    auth_status_t status = check_auth(req);
+
+    // If Auth is MISSING or WRONG -> Send 401 with Redirect Body
+    if (status != AUTH_OK) {
+        const char* redirect_html = 
+            "<html><head>"
+            "<meta http-equiv='refresh' content='3;url=/' />"
+            "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
+            "<style>body{font-family:sans-serif;text-align:center;padding:50px;background:#F5F0EB;color:#521B1B;}</style>"
+            "</head><body>"
+            "<h1>Access Denied</h1>"
+            "<p>Authorization failed or was cancelled.</p>"
+            "<p>Redirecting to main page...</p>"
+            "<script>setTimeout(function(){ window.location.href='/'; }, 3000);</script>"
+            "</body></html>";
+            
+        // We MUST send 401 to make the browser prompt again
+        httpd_resp_set_status(req, "401 Unauthorized");
+        httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"" AUTH_REALM "\"");
+        httpd_resp_send(req, redirect_html, strlen(redirect_html));
+        return ESP_OK;
+    }
+    // -----------------------------
+
+    // 3. If Auth Success -> Run original code
     char* buf;
     size_t buf_len;
     buf_len = httpd_req_get_url_query_len(req) + 1;
