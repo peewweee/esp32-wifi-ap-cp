@@ -1,10 +1,10 @@
 /* Console example
 
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
+    This example code is in the Public Domain (or CC0 licensed, at your option.)
 
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
+    Unless required by applicable law or agreed to in writing, this
+    software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+    CONDITIONS OF ANY KIND, either express or implied.
 */
 
 #include "esp_spiffs.h"
@@ -72,11 +72,11 @@ uint32_t my_ip;
 uint32_t my_ap_ip;
 
 struct portmap_table_entry {
-  u32_t daddr;
-  u16_t mport;
-  u16_t dport;
-  u8_t proto;
-  u8_t valid;
+    u32_t daddr;
+    u16_t mport;
+    u16_t dport;
+    u8_t proto;
+    u8_t valid;
 };
 struct portmap_table_entry portmap_tab[IP_PORTMAP_MAX];
 
@@ -85,6 +85,8 @@ bool portal_authenticated = false;
 esp_netif_t* wifiAP;
 esp_netif_t* wifiSTA;
 
+// *** ADD THIS LINE ***
+void start_dns_server(void);
 httpd_handle_t start_webserver(void);
 
 static const char *TAG = "ESP32 NAT router";
@@ -99,14 +101,15 @@ static void initialize_nvs(void)
     ESP_ERROR_CHECK(err);
 }
 
-void init_spiffs(void) {
+void init_spiffs(void)
+{
     ESP_LOGI(TAG, "Initializing SPIFFS");
-    
+
     esp_vfs_spiffs_conf_t conf = {
-      .base_path = "/spiffs",
-      .partition_label = "storage", // This matches your partitions.csv name
-      .max_files = 5,
-      .format_if_mount_failed = false // Do NOT format, or you lose the image!
+        .base_path = "/spiffs",
+        .partition_label = "storage", // This matches your partitions.csv name
+        .max_files = 5,
+        .format_if_mount_failed = false // Do NOT format, or you lose the image!
     };
 
     esp_err_t ret = esp_vfs_spiffs_register(&conf);
@@ -121,7 +124,7 @@ void init_spiffs(void) {
         }
         return;
     }
-    
+
     size_t total = 0, used = 0;
     ret = esp_spiffs_info("storage", &total, &used);
     if (ret != ESP_OK) {
@@ -131,7 +134,8 @@ void init_spiffs(void) {
     }
 }
 // -----------------------
-esp_err_t apply_portmap_tab() {
+esp_err_t apply_portmap_tab()
+{
     for (int i = 0; i<IP_PORTMAP_MAX; i++) {
         if (portmap_tab[i].valid) {
             ip_portmap_add(portmap_tab[i].proto, my_ip, portmap_tab[i].mport, portmap_tab[i].daddr, portmap_tab[i].dport);
@@ -140,7 +144,8 @@ esp_err_t apply_portmap_tab() {
     return ESP_OK;
 }
 
-esp_err_t delete_portmap_tab() {
+esp_err_t delete_portmap_tab()
+{
     for (int i = 0; i<IP_PORTMAP_MAX; i++) {
         if (portmap_tab[i].valid) {
             ip_portmap_remove(portmap_tab[i].proto, portmap_tab[i].mport);
@@ -149,7 +154,8 @@ esp_err_t delete_portmap_tab() {
     return ESP_OK;
 }
 
-void print_portmap_tab() {
+void print_portmap_tab()
+{
     for (int i = 0; i<IP_PORTMAP_MAX; i++) {
         if (portmap_tab[i].valid) {
             printf ("%s", portmap_tab[i].proto == PROTO_TCP?"TCP ":"UDP ");
@@ -162,7 +168,8 @@ void print_portmap_tab() {
     }
 }
 
-esp_err_t get_portmap_tab() {
+esp_err_t get_portmap_tab()
+{
     esp_err_t err;
     nvs_handle_t nvs;
     size_t len;
@@ -187,7 +194,8 @@ esp_err_t get_portmap_tab() {
     return err;
 }
 
-esp_err_t add_portmap(u8_t proto, u16_t mport, u32_t daddr, u16_t dport) {
+esp_err_t add_portmap(u8_t proto, u16_t mport, u32_t daddr, u16_t dport)
+{
     esp_err_t err;
     nvs_handle_t nvs;
 
@@ -220,7 +228,8 @@ esp_err_t add_portmap(u8_t proto, u16_t mport, u32_t daddr, u16_t dport) {
     return ESP_ERR_NO_MEM;
 }
 
-esp_err_t del_portmap(u8_t proto, u16_t mport) {
+esp_err_t del_portmap(u8_t proto, u16_t mport)
+{
     esp_err_t err;
     nvs_handle_t nvs;
 
@@ -257,7 +266,7 @@ static void initialize_console(void)
     /* Drain stdout before reconfiguring it */
     fflush(stdout);
     fsync(fileno(stdout));
-    
+
     /* Minicom, screen, idf_monitor send CR when ENTER key is pressed */
     esp_vfs_dev_uart_port_set_rx_line_endings(0, ESP_LINE_ENDINGS_CR);
     /* Move the caret to the beginning of the next line on '\n' */
@@ -267,15 +276,15 @@ static void initialize_console(void)
      * correct while APB frequency is changing in light sleep mode.
      */
     const uart_config_t uart_config = {
-            .baud_rate = CONFIG_ESP_CONSOLE_UART_BAUDRATE,
-            .data_bits = UART_DATA_8_BITS,
-            .parity = UART_PARITY_DISABLE,
-            .stop_bits = UART_STOP_BITS_1,
-            #if defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S2)
-                .source_clk = UART_SCLK_REF_TICK,
-            #else
-                .source_clk = UART_SCLK_XTAL,
-            #endif
+        .baud_rate = CONFIG_ESP_CONSOLE_UART_BAUDRATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        #if defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S2)
+            .source_clk = UART_SCLK_REF_TICK,
+        #else
+            .source_clk = UART_SCLK_XTAL,
+        #endif
     };
     /* Install UART driver for interrupt-driven reads and writes */
     ESP_ERROR_CHECK( uart_driver_install(CONFIG_ESP_CONSOLE_UART_NUM,
@@ -310,10 +319,10 @@ static void initialize_console(void)
 
     /* Initialize the console */
     esp_console_config_t console_config = {
-            .max_cmdline_args = 8,
-            .max_cmdline_length = 256,
+        .max_cmdline_args = 8,
+        .max_cmdline_length = 256,
 #if CONFIG_LOG_COLORS
-            .hint_color = atoi(LOG_COLOR_CYAN)
+        .hint_color = atoi(LOG_COLOR_CYAN)
 #endif
     };
     ESP_ERROR_CHECK( esp_console_init(&console_config) );
@@ -355,7 +364,7 @@ void * led_status_thread(void * p)
 }
 
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
-                                int32_t event_id, void* event_data)
+                               int32_t event_id, void* event_data)
 {
     esp_netif_dns_info_t dns;
 
@@ -379,11 +388,15 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         my_ip = event->ip_info.ip.addr;
         delete_portmap_tab();
         apply_portmap_tab();
-        if (esp_netif_get_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK)
-        {
-            esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns);
-            ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&(dns.ip.u_addr.ip4)));
-        }
+
+        // ******* DELETE OR COMMENT OUT THESE LINES *******
+        // if (esp_netif_get_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK)
+        // {
+        //    esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns);
+        //    ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&(dns.ip.u_addr.ip4)));
+        // }
+        // *************************************************
+
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED)
@@ -408,7 +421,7 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     // esp_netif_dns_info_t dnsinfo;
 
     wifi_event_group = xEventGroupCreate();
-  
+
     esp_netif_init();
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifiAP = esp_netif_create_default_wifi_ap();
@@ -438,22 +451,22 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     esp_event_handler_instance_t instance_any_id;
     esp_event_handler_instance_t instance_got_ip;
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        ESP_EVENT_ANY_ID,
-                                                        &wifi_event_handler,
-                                                        NULL,
-                                                        &instance_any_id));
+                                                         ESP_EVENT_ANY_ID,
+                                                         &wifi_event_handler,
+                                                         NULL,
+                                                         &instance_any_id));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
-                                                        IP_EVENT_STA_GOT_IP,
-                                                        &wifi_event_handler,
-                                                        NULL,
-                                                        &instance_got_ip));
+                                                         IP_EVENT_STA_GOT_IP,
+                                                         &wifi_event_handler,
+                                                         NULL,
+                                                         &instance_got_ip));
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
     /* ESP WIFI CONFIG */
     wifi_config_t wifi_config = { 0 };
-        wifi_config_t ap_config = {
+    wifi_config_t ap_config = {
         .ap = {
             .channel = 0,
             .authmode = WIFI_AUTH_WPA2_WPA3_PSK,
@@ -467,7 +480,7 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
     if (strlen(ap_passwd) < 8) {
         ap_config.ap.authmode = WIFI_AUTH_OPEN;
     } else {
-	    strlcpy((char*)ap_config.sta.password, ap_passwd, sizeof(ap_config.sta.password));
+        strlcpy((char*)ap_config.sta.password, ap_passwd, sizeof(ap_config.sta.password));
     }
 
     if (strlen(ssid) > 0) {
@@ -529,7 +542,7 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
         ESP_LOGI(TAG, "wifi_init_apsta finished.");
         ESP_LOGI(TAG, "connect to ap SSID: %s ", ssid);
     } else {
-        ESP_LOGI(TAG, "wifi_init_ap with default finished.");      
+        ESP_LOGI(TAG, "wifi_init_ap with default finished.");
     }
 }
 
@@ -546,7 +559,8 @@ char* ap_ssid = NULL;
 char* ap_passwd = NULL;
 char* ap_ip = NULL;
 
-char* param_set_default(const char* def_val) {
+char* param_set_default(const char* def_val)
+{
     char * retval = malloc(strlen(def_val)+1);
     strcpy(retval, def_val);
     return retval;
@@ -592,7 +606,7 @@ void app_main(void)
     get_config_param_str("ap_ssid", &ap_ssid);
     if (ap_ssid == NULL) {
         ap_ssid = param_set_default("ESP32_NAT_Router");
-    }   
+    }
     get_config_param_str("ap_passwd", &ap_passwd);
     if (ap_passwd == NULL) {
         ap_passwd = param_set_default("");
@@ -618,7 +632,12 @@ void app_main(void)
     if (lock == NULL) {
         lock = param_set_default("0");
     }
-    if (strcmp(lock, "0") ==0) {
+    if (strcmp(lock, "0") == 0) {
+        // *** ADD THESE LINES ***
+        ESP_LOGI(TAG, "Starting DNS Server to handle Captive Portal...");
+        start_dns_server();
+        // ***********************
+
         ESP_LOGI(TAG,"Starting config web server");
         start_webserver();
     }
@@ -644,9 +663,9 @@ void app_main(void)
            "Press TAB when typing command name to auto-complete.\n");
 
     if (strlen(ssid) == 0) {
-         printf("\n"
+        printf("\n"
                "Unconfigured WiFi\n"
-               "Configure using 'set_sta' and 'set_ap' and restart.\n");       
+               "Configure using 'set_sta' and 'set_ap' and restart.\n");
     }
 
     /* Figure out if the terminal supports escape sequences */

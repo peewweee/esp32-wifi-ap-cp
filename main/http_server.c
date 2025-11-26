@@ -17,10 +17,10 @@
 #include <sys/param.h>
 #include "esp_netif.h"
 #include <esp_http_server.h>
-    
+
 // Required for NAT control
 #include "lwip/lwip_napt.h"
-#include "lwip/sockets.h" 
+#include "lwip/sockets.h"
 
 // Your project's global variables
 #include "router_globals.h"
@@ -40,7 +40,7 @@ static const char *TAG_ADMIN = "ADMIN_SERVER";
 // --- SESSION CONFIGURATION ---
 #define MAX_CLIENTS 20
 // TIMER SET TO 60 SECONDS FOR TESTING
-#define SESSION_DURATION_SEC 60 
+#define SESSION_DURATION_SEC 60
 #define SESSION_DURATION_US (SESSION_DURATION_SEC * 1000000LL)
 
 // --- PER-DEVICE SESSION STRUCTURE ---
@@ -66,18 +66,20 @@ static void restart_timer_callback(void* arg)
 }
 
 esp_timer_create_args_t restart_timer_args = {
-        .callback = &restart_timer_callback,
-        .arg = (void*) 0,
-        .name = "restart_timer"
+    .callback = &restart_timer_callback,
+    .arg = (void*) 0,
+    .name = "restart_timer"
 };
 
 // --- SESSION MANAGER FUNCTIONS ---
 
-void init_sessions() {
+void init_sessions()
+{
     for(int i=0; i<MAX_CLIENTS; i++) sessions[i].active = false;
 }
 
-uint32_t get_client_ip(httpd_req_t *req) {
+uint32_t get_client_ip(httpd_req_t *req)
+{
     int sockfd = httpd_req_to_sockfd(req);
     struct sockaddr_in addr;
     socklen_t addr_len = sizeof(addr);
@@ -87,36 +89,38 @@ uint32_t get_client_ip(httpd_req_t *req) {
     return 0;
 }
 
-int get_remaining_seconds(uint32_t ip) {
+int get_remaining_seconds(uint32_t ip)
+{
     int64_t now = esp_timer_get_time();
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (sessions[i].active && sessions[i].ip_addr == ip) {
             int64_t remaining = sessions[i].end_time - now;
             if (remaining <= 0) {
-                sessions[i].active = false; 
+                sessions[i].active = false;
                 return -1;
             }
             return (int)(remaining / 1000000LL);
         }
     }
-    return -1; 
+    return -1;
 }
 
-void start_session(uint32_t ip) {
+void start_session(uint32_t ip)
+{
     int64_t now = esp_timer_get_time();
-    
+
     // Check if user already exists
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (sessions[i].active && sessions[i].ip_addr == ip) {
             // If session exists and has time left, DO NOT reset it.
             if (sessions[i].end_time > now) {
                 ESP_LOGI(TAG_WEB, "Session exists for IP %lu. Keeping existing time.", ip);
-                return; 
+                return;
             }
             break;
         }
     }
-    
+
     // Create new session
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (!sessions[i].active) {
@@ -127,14 +131,15 @@ void start_session(uint32_t ip) {
             return;
         }
     }
-    
+
     // Fallback: overwrite first slot
     sessions[0].ip_addr = ip;
     sessions[0].end_time = now + SESSION_DURATION_US;
     sessions[0].active = true;
 }
 
-char* html_escape(const char* src) {
+char* html_escape(const char* src)
+{
     int len = strlen(src);
     int esc_len = len + 1;
     for (int i = 0; i < len; i++) {
@@ -161,31 +166,33 @@ static esp_err_t api_status_handler(httpd_req_t *req)
     bool is_connected = (remaining_seconds > 0);
     if (remaining_seconds < 0) remaining_seconds = 0;
 
-    char resp_buf[100]; 
+    char resp_buf[100];
     snprintf(resp_buf, sizeof(resp_buf), "{\"authenticated\": %s, \"remaining_seconds\": %d}", is_connected ? "true" : "false", remaining_seconds);
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*"); 
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, OPTIONS");
     httpd_resp_send(req, resp_buf, strlen(resp_buf));
     return ESP_OK;
 }
-// --- INSERT THIS HELPER FUNCTION HERE ---
+
+// --- AUTH HELPER FUNCTION ---
 typedef enum {
     AUTH_OK = 0,
     AUTH_MISSING = 1,
     AUTH_WRONG = 2
 } auth_status_t;
 
-static auth_status_t check_auth(httpd_req_t *req) {
+static auth_status_t check_auth(httpd_req_t *req)
+{
     char *buf = NULL;
     size_t buf_len = 0;
-    
+
     buf_len = httpd_req_get_hdr_value_len(req, "Authorization") + 1;
     if (buf_len <= 1) return AUTH_MISSING;
 
     buf = malloc(buf_len);
     if (!buf) return AUTH_MISSING;
-    
+
     if (httpd_req_get_hdr_value_str(req, "Authorization", buf, buf_len) != ESP_OK) {
         free(buf);
         return AUTH_MISSING;
@@ -196,14 +203,14 @@ static auth_status_t check_auth(httpd_req_t *req) {
         return AUTH_MISSING;
     }
 
-    char *encoded = buf + 6; 
-    unsigned char decoded[64]; 
+    char *encoded = buf + 6;
+    unsigned char decoded[64];
     size_t decoded_len = 0;
-    
-    mbedtls_base64_decode(decoded, sizeof(decoded), &decoded_len, 
-                         (const unsigned char *)encoded, strlen(encoded));
-    decoded[decoded_len] = '\0'; 
-    free(buf); 
+
+    mbedtls_base64_decode(decoded, sizeof(decoded), &decoded_len,
+                             (const unsigned char *)encoded, strlen(encoded));
+    decoded[decoded_len] = '\0';
+    free(buf);
 
     char expected[64];
     snprintf(expected, sizeof(expected), "%s:%s", ADMIN_USERNAME, ADMIN_PASSWORD);
@@ -222,7 +229,7 @@ static esp_err_t admin_config_handler(httpd_req_t *req)
 
     // If Auth is MISSING or WRONG -> Send 401 with Redirect Body
     if (status != AUTH_OK) {
-        const char* redirect_html = 
+        const char* redirect_html =
             "<html><head>"
             "<meta http-equiv='refresh' content='3;url=/' />"
             "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
@@ -233,7 +240,7 @@ static esp_err_t admin_config_handler(httpd_req_t *req)
             "<p>Redirecting to main page...</p>"
             "<script>setTimeout(function(){ window.location.href='/'; }, 3000);</script>"
             "</body></html>";
-            
+
         // We MUST send 401 to make the browser prompt again
         httpd_resp_set_status(req, "401 Unauthorized");
         httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"" AUTH_REALM "\"");
@@ -250,7 +257,7 @@ static esp_err_t admin_config_handler(httpd_req_t *req)
         buf = malloc(buf_len);
         if (httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
             if (strcmp(buf, "reset=Reboot") == 0) esp_timer_start_once(restart_timer, 500000);
-            char param1[64]; char param2[64]; 
+            char param1[64]; char param2[64];
             if (httpd_query_key_value(buf, "ap_ssid", param1, sizeof(param1)) == ESP_OK) {
                 preprocess_string(param1);
                 if (httpd_query_key_value(buf, "ap_password", param2, sizeof(param2)) == ESP_OK) {
@@ -264,7 +271,7 @@ static esp_err_t admin_config_handler(httpd_req_t *req)
                 preprocess_string(param1);
                 if (httpd_query_key_value(buf, "password", param2, sizeof(param2)) == ESP_OK) {
                     preprocess_string(param2);
-                    char* argv[] = {"set_sta", param1, param2, "-u", "", "-a", ""}; 
+                    char* argv[] = {"set_sta", param1, param2, "-u", "", "-a", ""};
                     int argc = 3;
                     set_sta(argc, argv);
                     esp_timer_start_once(restart_timer, 500000);
@@ -295,18 +302,18 @@ static esp_err_t portal_handler(httpd_req_t *req)
         httpd_resp_send(req, NULL, 0);
         return ESP_OK;
     }
-    
+
     // Serve the Login HTML
-    const char* resp_str = 
+    const char* resp_str =
         "<html><head><title>CPE Wi-Fi</title>"
         "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
         "<style>"
         /* Body now centers the card in the middle of the screen */
         " body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F5F0EB; color: #521B1B; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }"
-        
+
         /* NEW: Card container for Laptop/Desktop view */
         " .card { width: 100%%; max-width: 420px; background-color: #ffffff; padding: 40px; border-radius: 24px; box-shadow: 0 10px 40px rgba(82, 27, 27, 0.1); display: flex; flex-direction: column; align-items: center; }"
-        
+
         " .icon { width: 80px; height: 80px; fill: #521B1B; margin-bottom: 20px; }"
         " h2 { font-size: 20px; font-weight: normal; color: #6D3B39; margin: 0; text-align: center; }"
         " h1 { font-size: 28px; font-weight: bold; margin: 5px 0 30px 0; text-align: center; }"
@@ -314,40 +321,40 @@ static esp_err_t portal_handler(httpd_req_t *req)
         " .content { width: 100%%; }"
         " h3 { font-size: 16px; font-weight: bold; margin-bottom: 10px; color: #521B1B; }"
         " p { font-size: 13px; line-height: 1.6; color: #6D3B39; margin-bottom: 25px; text-align: justify; }"
-        
+
         " .checkbox-container { display: flex; align-items: center; font-size: 13px; font-weight: bold; margin-bottom: 30px; color: #521B1B; width: 100%%; background: #F9F6F3; padding: 10px; border-radius: 8px; box-sizing: border-box; }"
         " input[type='checkbox'] { transform: scale(1.3); margin-right: 12px; accent-color: #521B1B; cursor: pointer; }"
-        
+
         " .btn { display: block; width: 100%%; padding: 14px 0; font-size: 16px; font-weight: bold; color: #fff; background-color: #1D734B; border: none; border-radius: 12px; text-decoration: none; text-align: center; cursor: pointer; transition: all 0.2s ease; }"
         " .btn:hover { background-color: #145235; transform: translateY(-1px); }"
         "</style>"
         "<script>"
         " function toggleButton() {"
-        "   var checkBox = document.getElementById('agree');"
-        "   var btn = document.getElementById('connectBtn');"
-        "   if (checkBox.checked){ btn.style.pointerEvents = 'auto'; btn.style.opacity = '1'; } "
-        "   else { btn.style.pointerEvents = 'none'; btn.style.opacity = '0.5'; }"
+        "    var checkBox = document.getElementById('agree');"
+        "    var btn = document.getElementById('connectBtn');"
+        "    if (checkBox.checked){ btn.style.pointerEvents = 'auto'; btn.style.opacity = '1'; } "
+        "    else { btn.style.pointerEvents = 'none'; btn.style.opacity = '0.5'; }"
         " }"
         "</script>"
         "</head>"
         "<body>"
         /* Wrapped everything in the new .card div */
         " <div class='card'>"
-        "   <svg class='icon' viewBox='0 0 24 24'>"
-        "    <path d='M12 21L12 21C11.05 21 10.24 20.43 9.85 19.63L12 17L14.15 19.63C13.76 20.43 12.95 21 12 21ZM12 3C7.95 3 4.21 4.34 1.2 6.6L3 9C5.5 7.12 8.62 6 12 6C15.38 6 18.5 7.12 21 9L22.8 6.6C19.79 4.34 16.05 3 12 3ZM12 9C9.3 9 6.81 9.89 4.8 11.4L6.6 13.8C8.1 12.67 9.97 12 12 12C14.03 12 15.9 12.67 17.4 13.8L19.2 11.4C17.19 9.89 14.7 9 12 9Z'/>"
-        "   </svg>"
-        "   <h2>You are connecting to</h2>"
-        "   <h1>&lsquo;CPE Wi-Fi&rsquo;</h1>"
-        "   <div class='content'>"
-        "    <hr>"
-        "    <h3>Terms and Conditions</h3>"
-        "    <p>By connecting to this Wi-Fi network, you agree to use the service solely for educational purposes. Each device is allowed a maximum connection time of <strong>1 hour per day</strong>.</p>"
-        "    <div class='checkbox-container'>"
-        "     <input type='checkbox' id='agree' onclick='toggleButton()'>"
-        "     <label for='agree'>I agree to the Terms.</label>"
+        "    <svg class='icon' viewBox='0 0 24 24'>"
+        "     <path d='M12 21L12 21C11.05 21 10.24 20.43 9.85 19.63L12 17L14.15 19.63C13.76 20.43 12.95 21 12 21ZM12 3C7.95 3 4.21 4.34 1.2 6.6L3 9C5.5 7.12 8.62 6 12 6C15.38 6 18.5 7.12 21 9L22.8 6.6C19.79 4.34 16.05 3 12 3ZM12 9C9.3 9 6.81 9.89 4.8 11.4L6.6 13.8C8.1 12.67 9.97 12 12 12C14.03 12 15.9 12.67 17.4 13.8L19.2 11.4C17.19 9.89 14.7 9 12 9Z'/>"
+        "    </svg>"
+        "    <h2>You are connecting to</h2>"
+        "    <h1>&lsquo;CPE Wi-Fi&rsquo;</h1>"
+        "    <div class='content'>"
+        "     <hr>"
+        "     <h3>Terms and Conditions</h3>"
+        "     <p>By connecting to this Wi-Fi network, you agree to use the service solely for educational purposes. Each device is allowed a maximum connection time of <strong>1 hour per day</strong>.</p>"
+        "     <div class='checkbox-container'>"
+        "      <input type='checkbox' id='agree' onclick='toggleButton()'>"
+        "      <label for='agree'>I agree to the Terms.</label>"
+        "     </div>"
+        "     <a href='/confirm' id='connectBtn' class='btn' style='pointer-events: none; opacity: 0.5;'>Start Browsing</a>"
         "    </div>"
-        "    <a href='/confirm' id='connectBtn' class='btn' style='pointer-events: none; opacity: 0.5;'>Start Browsing</a>"
-        "   </div>"
         " </div>"
         "</body></html>";
 
@@ -359,26 +366,33 @@ static esp_err_t portal_handler(httpd_req_t *req)
  * Hijacks DNS checks and sends to Portal (/) if not authenticated.
  * If authenticated, sends 404 to satisfy OS "Connectivity Check".
  */
+/* * REDIRECT HANDLER (Hijacks DNS checks) */
 static esp_err_t redirect_handler(httpd_req_t *req)
 {
+    // *** ADD THIS LINE ***
+    ESP_LOGI(TAG_WEB, "REDIRECT TRIGGERED by URI: %s", req->uri);
     uint32_t ip = get_client_ip(req);
     int remaining = get_remaining_seconds(ip);
 
     if (remaining > 0) {
-        // Authenticated. Return 404 to stop Captive Portal popup from hanging around.
-        httpd_resp_send_404(req);
+        // Authenticated. Return 204 No Content for most general checks.
+        // This is often more compliant than a 404 for connectivity checks.
+        httpd_resp_set_status(req, "204 No Content");
+        httpd_resp_send(req, NULL, 0);
         return ESP_OK;
     }
 
-    // Not authenticated. Redirect to Portal IP.
+    // Not authenticated. Redirect to Portal Root (/).
     httpd_resp_set_status(req, "302 Found");
     esp_netif_ip_info_t ip_info;
+    // Assuming wifiAP is your soft-AP netif handle
     esp_netif_get_ip_info(wifiAP, &ip_info);
     char ip_str[16];
     esp_ip4addr_ntoa(&ip_info.ip, ip_str, sizeof(ip_str));
-    
+
     char redirect_url[64];
-    snprintf(redirect_url, sizeof(redirect_url), "http://%s", ip_str);
+    // IMPORTANT: Redirect to the IP itself, which will hit the portal_handler (/)
+    snprintf(redirect_url, sizeof(redirect_url), "http://%s/", ip_str);
     httpd_resp_set_hdr(req, "Location", redirect_url);
     httpd_resp_send(req, NULL, 0);
 
@@ -393,12 +407,12 @@ static esp_err_t redirect_handler(httpd_req_t *req)
 static esp_err_t confirm_handler(httpd_req_t *req)
 {
     uint32_t ip = get_client_ip(req);
-    
+
     // --- START THE INTERNET HERE ---
     start_session(ip); // Starts session or keeps existing one
-    
+
     ip_napt_enable(my_ap_ip, 1);
-    
+
     esp_netif_dns_info_t dns;
     if (esp_netif_get_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK) {
         esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns);
@@ -410,7 +424,7 @@ static esp_err_t confirm_handler(httpd_req_t *req)
 
     ESP_LOGI(TAG_WEB, "Confirm Page. IP: %lu, Remaining: %d", ip, remaining_seconds);
 
-    char *resp_str = malloc(4096); 
+    char *resp_str = malloc(4096);
     if (resp_str == NULL) {
         httpd_resp_send_500(req);
         return ESP_FAIL;
@@ -463,11 +477,11 @@ static esp_err_t confirm_handler(httpd_req_t *req)
 /* Image Handler */
 static esp_err_t img_handler(httpd_req_t *req)
 {
-    char filepath[600]; 
+    char filepath[600];
     snprintf(filepath, sizeof(filepath), "/spiffs%s", req->uri);
     FILE *f = fopen(filepath, "r");
     if (f == NULL) { httpd_resp_send_404(req); return ESP_FAIL; }
-    
+
     if (strstr(req->uri, ".jpg") || strstr(req->uri, ".jpeg")) httpd_resp_set_type(req, "image/jpeg");
     else httpd_resp_set_type(req, "image/png");
 
@@ -493,8 +507,8 @@ httpd_handle_t start_webserver(void)
     char* safe_ap_ssid = html_escape(ap_ssid); char* safe_ap_passwd = html_escape(ap_passwd);
     char* safe_ssid = html_escape(ssid); char* safe_passwd = html_escape(passwd);
     char* safe_ent_username = html_escape(ent_username); char* safe_ent_identity = html_escape(ent_identity);
-    int page_len = strlen(config_page_template) + strlen(safe_ap_ssid) + strlen(safe_ap_passwd) + 
-                   strlen(safe_ssid) + strlen(safe_passwd) + strlen(safe_ent_username) + 
+    int page_len = strlen(config_page_template) + strlen(safe_ap_ssid) + strlen(safe_ap_passwd) +
+                   strlen(safe_ssid) + strlen(safe_passwd) + strlen(safe_ent_username) +
                    strlen(safe_ent_identity) + 256;
     char* config_page = malloc(sizeof(char) * page_len);
     snprintf(config_page, page_len, config_page_template,
@@ -505,29 +519,48 @@ httpd_handle_t start_webserver(void)
 
     if (httpd_start(&server, &config) != ESP_OK) return NULL;
 
+// --- CONSOLIDATED URI HANDLERS ---
+
+    // 1. Core Pages
     httpd_uri_t api_status_uri = { .uri = "/api/status", .method = HTTP_GET, .handler = api_status_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &api_status_uri);
     httpd_uri_t portal_uri = { .uri = "/", .method = HTTP_GET, .handler = portal_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &portal_uri);
-    
     httpd_uri_t confirm_uri = { .uri = "/confirm", .method = HTTP_GET, .handler = confirm_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &confirm_uri);
     httpd_uri_t admin_uri = { .uri = "/config", .method = HTTP_GET, .handler = admin_config_handler, .user_ctx = config_page };
     httpd_register_uri_handler(server, &admin_uri);
+
+    // 2. Critical Captive Portal Checks (All use redirect_handler)
+    // Checks that were duplicated in your provided code:
     httpd_uri_t gen_204_uri = { .uri = "/generate_204", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &gen_204_uri);
     httpd_uri_t connectivity_check_uri = { .uri = "/connectivity-check.html", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &connectivity_check_uri);
     httpd_uri_t hotspot_uri = { .uri = "/hotspot-detect.html", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &hotspot_uri);
+
+    // New, essential checks for broad OS coverage:
+    httpd_uri_t apple_full_check_uri = { .uri = "/library/test/success.html", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &apple_full_check_uri);
+    httpd_uri_t android_status_uri = { .uri = "/mobile/status.php", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &android_status_uri);
+    httpd_uri_t msft_check_uri = { .uri = "/ncsi.txt", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &msft_check_uri);
+
+    // 3. Image Handlers
     httpd_uri_t cea_uri = { .uri = "/cea.png", .method = HTTP_GET, .handler = img_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &cea_uri);
     httpd_uri_t phone_uri = { .uri = "/dashboard.png", .method = HTTP_GET, .handler = img_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &phone_uri);
     httpd_uri_t dash_uri = { .uri = "/dashboard-ui.png", .method = HTTP_GET, .handler = img_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &dash_uri);
+
+    // 4. Catch-All (MUST be the final registration)
     httpd_uri_t catch_all_uri = { .uri = "/*", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &catch_all_uri);
+
+    // --- END CONSOLIDATED URI HANDLERS ---
 
     return server;
 }
