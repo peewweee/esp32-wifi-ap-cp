@@ -337,7 +337,7 @@ static esp_err_t portal_handler(httpd_req_t *req)
         "    <path d='M12 21L12 21C11.05 21 10.24 20.43 9.85 19.63L12 17L14.15 19.63C13.76 20.43 12.95 21 12 21ZM12 3C7.95 3 4.21 4.34 1.2 6.6L3 9C5.5 7.12 8.62 6 12 6C15.38 6 18.5 7.12 21 9L22.8 6.6C19.79 4.34 16.05 3 12 3ZM12 9C9.3 9 6.81 9.89 4.8 11.4L6.6 13.8C8.1 12.67 9.97 12 12 12C14.03 12 15.9 12.67 17.4 13.8L19.2 11.4C17.19 9.89 14.7 9 12 9Z'/>"
         "   </svg>"
         "   <h2>You are connecting to</h2>"
-        "   <h1>&lsquo;CPE Wi-Fi&rsquo;</h1>"
+        "   <h1>&lsquo;SOLAR CONNECT&rsquo;</h1>"
         "   <div class='content'>"
         "    <hr>"
         "    <h3>Terms and Conditions</h3>"
@@ -395,7 +395,7 @@ static esp_err_t confirm_handler(httpd_req_t *req)
     uint32_t ip = get_client_ip(req);
     
     // --- START THE INTERNET HERE ---
-    start_session(ip); // Starts session or keeps existing one
+    start_session(ip); 
     
     ip_napt_enable(my_ap_ip, 1);
     
@@ -408,51 +408,54 @@ static esp_err_t confirm_handler(httpd_req_t *req)
     int remaining_seconds = get_remaining_seconds(ip);
     if (remaining_seconds < 0) remaining_seconds = 0;
 
-    ESP_LOGI(TAG_WEB, "Confirm Page. IP: %lu, Remaining: %d", ip, remaining_seconds);
-
-    char *resp_str = malloc(4096); 
+    // Increased buffer size for the advanced responsive CSS
+    char *resp_str = malloc(8192); 
     if (resp_str == NULL) {
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
-    snprintf(resp_str, 4096,
-    "<!DOCTYPE html><html><head><title>Connected to CPE Wi-Fi</title>"
+    snprintf(resp_str, 8192,
+    "<!DOCTYPE html><html><head><title>Connected to 'SOLAR CONNECT'</title>"
     "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
     "<style>"
-    "body { font-family: Inter, sans-serif; text-align: center; background-color: #F5EFE6; margin: 0; padding: 0; color: #4A3B32; }"
-    ".container { max-width: 600px; margin: 0 auto; padding: 0 20px 40px 20px; }"
-    /* --- UPDATED HERO CLASS --- */
-    /* height: 50vh means 50% of viewport height. object-fit: cover prevents squishing. */
-    ".hero { width: 100%%; height: 50vh; object-fit: cover; display: block; margin-bottom: 10px; mask-image: linear-gradient(to bottom, black 60%%, transparent 100%%); -webkit-mask-image: linear-gradient(to bottom, black 60%%, transparent 100%%); }"
-    /* -------------------------- */
-    "h1 { color: #6F1D1B; font-size: 24px; font-weight: 400; margin: 0; }"
+    "body { font-family: Inter, sans-serif; text-align: left; background-color: white; margin: 0; padding: 0; color: #41341E; }"
+    ".hero { width: 100%%; height: 40vh; object-fit: cover; display: block; mask-image: linear-gradient(to bottom, black 60%%, transparent 100%%); -webkit-mask-image: linear-gradient(to bottom, black 60%%, transparent 100%%); }"
+    ".container { width: 100%%; max-width: 800px; margin: -60px auto 40px; padding: 0 15px; position: relative; z-index: 10; box-sizing: border-box; }"
+    ".main-card { background: #F5EFE6; padding: 25px; border-radius: 24px; height: 420px; overflow: hidden; width: 95%%; max-width: 550px; margin: 0 auto; box-sizing: border-box; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.08); transition: height 0.3s ease; }"
+    ".main-card::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 100px; background: linear-gradient(to bottom, rgba(245, 239, 230, 0), #F5EFE6); pointer-events: none; z-index: 2; }"
+    "h1 { color: #6F1D1B; font-size: clamp(20px, 4.5vw, 26px); font-weight: 400; margin: 0; line-height: 1.2; }"
     "h1 b { font-weight: 700; display: block; }"
-    "hr { border: 0; height: 1px; background-color: #E0D8D0; margin: 30px 0; }"
-    ".dash-area { text-align: left; }"
-    "h2 { font-size: 18px; font-weight: 700; margin-bottom: 10px; }"
-    ".btn { display: inline-block; background-color: #1A1A1A; color: white; text-decoration: none; padding: 10px 15px; border-radius: 8px; font-weight: 600; margin-bottom: 20px; }"
-    ".grid { display: flex; gap: 10px; justify-content: center; align-items: flex-start; }"
-    ".grid img { max-width: 100%%; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }"
-    ".p-img { width: 45%%; }"
-    ".d-img { width: 50%%; margin-top: 40px; }"
+    "hr { border: 0; height: 1px; background-color: #E0D8D0; margin: 18px 0; }"
+    ".grid { display: flex; gap: 12px; align-items: flex-start; }"
+    ".left-col { flex: 1; }"
+    ".right-col { flex: 1.2; display: flex; flex-direction: column; align-items: stretch; }"
+    "img.p-img, img.d-img { width: 100%%; height: auto; border-radius: 12px; display: block; }"
+    "@media (max-width: 400px) { .right-col { width: 142px; flex: none; } .left-col { width: 142px; flex: none; } .main-card { height: 320px; } }"
+    "@media (max-width: 320px) { .grid { flex-direction: column; gap: 20px; } .right-col { order: 1; width: 100%%; } .left-col { order: 2; width: 100%%; } .main-card { height: 580px; } }"
+    "h2 { font-size: clamp(12px, 2.5vw, 12px); font-weight: 700; margin: 0 0 10px 2px; width: 100%%; }"
+    ".btn { font-size: clamp(10px, 2vw, 13px); display: block; background-color: #1A1A1A; color: white; text-decoration: none; padding: clamp(8px, 1.5vw, 10px) 0; text-align: center; border-radius: 8px; font-weight: 600; margin-bottom: 11px; margin-left: 2px; width: 85%%; box-sizing: border-box; white-space: nowrap; }"
     "</style>"
     "</head><body>"
     "<img src='/cea.png' class='hero' />"
     "<div class='container'>"
-    "  <h1>You are now connected to<br><b>'CPE Wi-Fi'</b></h1>"
-    "  <hr>"
-    "  <div class='dash-area'>"
-    "    <h2>Explore the dashboard</h2>"
-    "    <a href='https://spcs-v1.vercel.app?connected=true&seconds=%d' target='_blank' class='btn'>Solar-Powered Charging Station</a>"
+    "  <div class='main-card'>"
+    "    <h1>You are now connected to<br><b>'SOLAR CONNECT'</b></h1>"
+    "    <hr>"
     "    <div class='grid'>"
-    "      <img src='/dashboard.png'  class='p-img'/>"
-    "      <img src='/dashboard-ui.png' class='d-img'/>"
+    "      <div class='left-col'>"
+    "        <img src='/dashboard.png' class='p-img'/>"
+    "      </div>"
+    "      <div class='right-col'>"
+    "        <h2>Explore the dashboard</h2>"
+    "        <a href='https://spcs-v1.vercel.app?connected=true&seconds=%d' target='_blank' class='btn'>Solar-Powered Bench</a>"
+    "        <img src='/dashboard-ui.png' class='d-img'/>"
+    "      </div>"
     "    </div>"
     "  </div>"
     "</div>"
     "</body></html>",
-    remaining_seconds // This integer replaces the %d in the URL above
+    remaining_seconds
     );
 
     httpd_resp_send(req, resp_str, strlen(resp_str));

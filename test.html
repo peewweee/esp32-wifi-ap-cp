@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>UI Test - SOLAR CONNECT</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { 
+            font-family: Inter, sans-serif; 
+            text-align: left; 
+            background-color: white; 
+            margin: 0; 
+            padding: 0; 
+            color: #41341E; 
+        }
+
+        .hero { 
+            width: 100%; 
+            height: 40vh; 
+            object-fit: cover; 
+            display: block; 
+            mask-image: linear-gradient(to bottom, black 60%, transparent 100%); 
+            -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%); 
+        }
+
+        .container { 
+            width: 100%;
+            max-width: 800px; 
+            margin: -60px auto 40px; 
+            padding: 0 15px; 
+            position: relative; 
+            z-index: 10; 
+            box-sizing: border-box;
+        }
+
+        .main-card { 
+            background: #F5EFE6; 
+            padding: 25px; 
+            border-radius: 24px; 
+            height: 420px; 
+            overflow: hidden;
+            width: 95%;
+            max-width: 550px; 
+            margin: 0 auto; 
+            box-sizing: border-box;
+            position: relative; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+            transition: height 0.3s ease;
+        }
+
+        .main-card::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 100px; 
+            background: linear-gradient(to bottom, rgba(245, 239, 230, 0), #F5EFE6);
+            pointer-events: none; 
+            z-index: 2;
+        }
+
+        h1 { 
+            color: #6F1D1B; 
+            font-size: clamp(20px, 4.5vw, 26px); 
+            font-weight: 400; 
+            margin: 0; 
+            line-height: 1.2;
+        }
+        h1 b { font-weight: 700; display: block; }
+
+        hr { 
+            border: 0; 
+            height: 1px; 
+            background-color: #E0D8D0; 
+            margin: 18px 0; 
+        }
+
+        .grid { 
+            display: flex; 
+            gap: 12px; 
+            align-items: flex-start; 
+        }
+
+        .left-col { flex: 1; }
+        
+        /* --- PROPORTIONAL COLUMN --- */
+        .right-col { 
+            flex: 1.2; 
+            display: flex; 
+            flex-direction: column; 
+            /* This ensures everything inside stays locked to the same width */
+            align-items: stretch; 
+        }
+
+        img.p-img, img.d-img { 
+            width: 100%; 
+            height: auto; 
+            border-radius: 12px;
+            display: block;
+        }
+
+        @media (max-width: 400px) {
+            /* Locked size for iPhone 12 Pro baseline */
+            .right-col { width: 142px; flex: none; }
+            .left-col { width: 142px; flex: none; }
+            .main-card { height: 320px; } 
+        }
+
+        @media (max-width: 320px) {
+            .grid { flex-direction: column; gap: 20px; }
+            .right-col { order: 1; width: 100%; }
+            .left-col { order: 2; width: 100%; }
+            .main-card { height: 580px; } 
+        }
+
+        h2 { 
+            font-size: clamp(12px, 2.5vw, 12px); 
+            font-weight: 700; 
+            margin: 0 0 10px 2px;
+            /* Text will wrap exactly at the image's edge */
+            width: 100%; 
+        }
+
+        .btn { 
+            font-size: clamp(10px, 2vw, 13px);
+            display: block; 
+            background-color: #1A1A1A; 
+            color: white; 
+            text-decoration: none; 
+            padding: clamp(8px, 1.5vw, 10px) 0; /* Vertical padding only */
+            text-align: center; /* Centers text within the button's full width */
+            border-radius: 8px; 
+            font-weight: 600; 
+            margin-bottom: 11px; 
+            margin-left: 2px;
+            width: 85%; /* Matches the image width exactly */
+            box-sizing: border-box;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+    <img src="spiffs_image/cea.png" class="hero" />
+    <div class="container">
+        <div class="main-card">
+            <h1>You are now connected to<br><b>'SOLAR CONNECT'</b></h1>
+            <hr> 
+            <div class="grid">
+                <div class="left-col">
+                    <img src="spiffs_image/dashboard.png" class="p-img"/>
+                </div>
+                <div class="right-col">
+                    <h2>Explore the dashboard</h2>
+                    <a href="#" class="btn">Solar-Powered Bench</a>
+                    <img src="spiffs_image/dashboard-ui.png" class="d-img"/>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
