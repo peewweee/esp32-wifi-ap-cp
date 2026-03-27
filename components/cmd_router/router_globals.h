@@ -41,6 +41,7 @@ extern esp_netif_t* wifiSTA;
 
 
 // --- Function Declarations ---
+bool is_client_session_active(uint32_t ip_addr);
 void preprocess_string(char* str);
 int set_sta(int argc, char **argv);
 int set_sta_static(int argc, char **argv);

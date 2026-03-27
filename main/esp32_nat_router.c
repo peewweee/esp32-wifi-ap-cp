@@ -39,6 +39,9 @@
 #include "cmd_decl.h"
 #include <esp_http_server.h>
 
+#include "dns_server.h"
+#include "net_diag.h"
+
 #if !IP_NAPT
 #error "IP_NAPT must be defined"
 #endif
@@ -361,12 +364,16 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
 
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START)
     {
+        net_diag_log_snapshot("sta_start");
         esp_wifi_connect();
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
     {
         ESP_LOGI(TAG,"disconnected - retry to connect to the AP");
         ap_connect = false;
+        my_ip = 0;
+        net_diag_log_snapshot("sta_disconnected");
+        net_diag_schedule_probe("sta_disconnected");
         esp_wifi_connect();
         ESP_LOGI(TAG, "retry to connect to the AP");
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
@@ -377,24 +384,28 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
         ap_connect = true;
         my_ip = event->ip_info.ip.addr;
+        esp_netif_set_default_netif(wifiSTA);
         delete_portmap_tab();
         apply_portmap_tab();
         if (esp_netif_get_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK)
         {
-            esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns);
-            ESP_LOGI(TAG, "set dns to:" IPSTR, IP2STR(&(dns.ip.u_addr.ip4)));
+            ESP_LOGI(TAG, "upstream dns:" IPSTR, IP2STR(&(dns.ip.u_addr.ip4)));
         }
+        net_diag_log_snapshot("sta_got_ip");
+        net_diag_schedule_probe("sta_got_ip");
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED)
     {
         connect_count++;
         ESP_LOGI(TAG,"%d. station connected", connect_count);
+        net_diag_log_snapshot("ap_client_connected");
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED)
     {
         connect_count--;
         ESP_LOGI(TAG,"station disconnected - %d remain", connect_count);
+        net_diag_log_snapshot("ap_client_disconnected");
     }
 }
 
@@ -607,6 +618,11 @@ void app_main(void)
     // Setup WIFI
     wifi_init(mac, ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, ap_mac, ap_ssid, ap_passwd, ap_ip);
 
+    net_diag_start_task();
+    net_diag_set_napt_state(false, ESP_OK);
+    net_diag_set_portal_state(false, "boot");
+    net_diag_log_snapshot("post_wifi_init");
+
     pthread_t t1;
     pthread_create(&t1, NULL, led_status_thread, NULL);
 
@@ -620,6 +636,7 @@ void app_main(void)
     }
     if (strcmp(lock, "0") ==0) {
         ESP_LOGI(TAG,"Starting config web server");
+        start_dns_server();
         start_webserver();
     }
     free(lock);

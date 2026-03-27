@@ -7,25 +7,25 @@
  * 3. /confirm -> Enables Internet, Starts Timer, Displays Link to Root PWA
  */
 #include <stdio.h>
+#include <errno.h>
 #include <sys/stat.h>
 #include "esp_spiffs.h"
 
 #include <esp_wifi.h>
 #include <esp_event.h>
+#include <esp_err.h>
 #include <esp_log.h>
 #include <esp_system.h>
 #include <sys/param.h>
 #include "esp_netif.h"
 #include <esp_http_server.h>
-    
-// Required for NAT control
-#include "lwip/lwip_napt.h"
 #include "lwip/sockets.h" 
 
 // Your project's global variables
 #include "router_globals.h"
 
 #include "pages.h"
+#include "net_diag.h"
 #include "esp_timer.h"
 #include "mbedtls/base64.h" // Required for decoding the password
 
@@ -51,11 +51,18 @@ typedef struct {
 } client_session_t;
 
 static client_session_t sessions[MAX_CLIENTS];
+static bool s_napt_enabled;
+static int64_t s_global_session_end_time;
 
 // --- FORWARD DECLARATIONS ---
 int get_remaining_seconds(uint32_t ip);
 void start_session(uint32_t ip);
 uint32_t get_client_ip(httpd_req_t *req);
+
+static esp_err_t send_redirect_to_portal(httpd_req_t *req);
+static esp_err_t send_probe_success(httpd_req_t *req);
+static esp_err_t ensure_napt_enabled(void);
+static int get_global_remaining_seconds(void);
 
 esp_timer_handle_t restart_timer;
 
@@ -77,6 +84,41 @@ void init_sessions() {
     for(int i=0; i<MAX_CLIENTS; i++) sessions[i].active = false;
 }
 
+static esp_err_t ensure_napt_enabled(void)
+{
+    if (s_napt_enabled) {
+        return ESP_OK;
+    }
+
+    esp_err_t err = esp_netif_napt_enable(wifiAP);
+    if (err == ESP_OK) {
+        s_napt_enabled = true;
+        ESP_LOGI(TAG_WEB, "NAPT enabled on SoftAP netif");
+        net_diag_set_napt_state(true, ESP_OK);
+        return ESP_OK;
+    }
+
+    ESP_LOGE(TAG_WEB, "Failed to enable NAPT on SoftAP netif: %s", esp_err_to_name(err));
+    net_diag_set_napt_state(false, err);
+    net_diag_schedule_probe("napt_enable_failed");
+    return err;
+}
+
+static int get_global_remaining_seconds(void)
+{
+    int64_t now = esp_timer_get_time();
+    int64_t remaining = s_global_session_end_time - now;
+
+    if (remaining <= 0) {
+        s_global_session_end_time = 0;
+        portal_authenticated = false;
+        net_diag_set_portal_state(false, "global_session_expired");
+        return -1;
+    }
+
+    return (int)(remaining / 1000000LL);
+}
+
 uint32_t get_client_ip(httpd_req_t *req) {
     int sockfd = httpd_req_to_sockfd(req);
     struct sockaddr_in addr;
@@ -84,10 +126,16 @@ uint32_t get_client_ip(httpd_req_t *req) {
     if (getpeername(sockfd, (struct sockaddr *)&addr, &addr_len) == 0) {
         return addr.sin_addr.s_addr;
     }
+    ESP_LOGW(TAG_WEB, "Failed to get client IP for sockfd %d, errno=%d", sockfd, errno);
     return 0;
 }
 
 int get_remaining_seconds(uint32_t ip) {
+    int global_remaining = get_global_remaining_seconds();
+    if (global_remaining > 0) {
+        return global_remaining;
+    }
+
     int64_t now = esp_timer_get_time();
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (sessions[i].active && sessions[i].ip_addr == ip) {
@@ -102,8 +150,16 @@ int get_remaining_seconds(uint32_t ip) {
     return -1; 
 }
 
+bool is_client_session_active(uint32_t ip_addr)
+{
+    return get_remaining_seconds(ip_addr) > 0;
+}
+
 void start_session(uint32_t ip) {
     int64_t now = esp_timer_get_time();
+    s_global_session_end_time = now + SESSION_DURATION_US;
+    portal_authenticated = true;
+    net_diag_set_portal_state(true, "portal_accept");
     
     // Check if user already exists
     for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -111,10 +167,18 @@ void start_session(uint32_t ip) {
             // If session exists and has time left, DO NOT reset it.
             if (sessions[i].end_time > now) {
                 ESP_LOGI(TAG_WEB, "Session exists for IP %lu. Keeping existing time.", ip);
+                net_diag_log_snapshot("session_reused");
                 return; 
             }
             break;
         }
+    }
+
+    if (ip == 0) {
+        ESP_LOGW(TAG_WEB, "Client IP lookup failed; using global session fallback");
+        net_diag_log_snapshot("session_global_fallback");
+        net_diag_schedule_probe("portal_accept");
+        return;
     }
     
     // Create new session
@@ -124,6 +188,8 @@ void start_session(uint32_t ip) {
             sessions[i].end_time = now + SESSION_DURATION_US;
             sessions[i].active = true;
             ESP_LOGI(TAG_WEB, "Starting NEW session for IP: %lu", ip);
+            net_diag_log_snapshot("session_started");
+            net_diag_schedule_probe("portal_accept");
             return;
         }
     }
@@ -132,6 +198,8 @@ void start_session(uint32_t ip) {
     sessions[0].ip_addr = ip;
     sessions[0].end_time = now + SESSION_DURATION_US;
     sessions[0].active = true;
+    net_diag_log_snapshot("session_overwrite_slot0");
+    net_diag_schedule_probe("portal_accept");
 }
 
 char* html_escape(const char* src) {
@@ -359,30 +427,64 @@ static esp_err_t portal_handler(httpd_req_t *req)
  * Hijacks DNS checks and sends to Portal (/) if not authenticated.
  * If authenticated, sends 404 to satisfy OS "Connectivity Check".
  */
-static esp_err_t redirect_handler(httpd_req_t *req)
+static esp_err_t send_redirect_to_portal(httpd_req_t *req)
 {
-    uint32_t ip = get_client_ip(req);
-    int remaining = get_remaining_seconds(ip);
-
-    if (remaining > 0) {
-        // Authenticated. Return 404 to stop Captive Portal popup from hanging around.
-        httpd_resp_send_404(req);
-        return ESP_OK;
-    }
-
-    // Not authenticated. Redirect to Portal IP.
     httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    httpd_resp_set_hdr(req, "Pragma", "no-cache");
+
     esp_netif_ip_info_t ip_info;
     esp_netif_get_ip_info(wifiAP, &ip_info);
     char ip_str[16];
     esp_ip4addr_ntoa(&ip_info.ip, ip_str, sizeof(ip_str));
     
     char redirect_url[64];
-    snprintf(redirect_url, sizeof(redirect_url), "http://%s", ip_str);
+    snprintf(redirect_url, sizeof(redirect_url), "http://%s/", ip_str);
     httpd_resp_set_hdr(req, "Location", redirect_url);
     httpd_resp_send(req, NULL, 0);
 
     return ESP_OK;
+}
+
+static esp_err_t send_probe_success(httpd_req_t *req)
+{
+    if (strcmp(req->uri, "/generate_204") == 0 || strcmp(req->uri, "/gen_204") == 0) {
+        httpd_resp_set_status(req, "204 No Content");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
+    if (strcmp(req->uri, "/connecttest.txt") == 0 || strcmp(req->uri, "/ncsi.txt") == 0) {
+        static const char windows_probe[] = "Microsoft Connect Test";
+        httpd_resp_set_type(req, "text/plain");
+        httpd_resp_send(req, windows_probe, HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    static const char apple_probe[] =
+        "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>";
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, apple_probe, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t redirect_handler(httpd_req_t *req)
+{
+    if (is_client_session_active(get_client_ip(req))) {
+        return send_probe_success(req);
+    }
+
+    return send_redirect_to_portal(req);
+}
+
+static esp_err_t catch_all_handler(httpd_req_t *req)
+{
+    if (is_client_session_active(get_client_ip(req))) {
+        httpd_resp_send_404(req);
+        return ESP_OK;
+    }
+
+    return send_redirect_to_portal(req);
 }
 
 /* * CONFIRM HANDLER (/confirm)
@@ -393,16 +495,59 @@ static esp_err_t redirect_handler(httpd_req_t *req)
 static esp_err_t confirm_handler(httpd_req_t *req)
 {
     uint32_t ip = get_client_ip(req);
+    net_diag_log_snapshot("confirm_handler");
     
     // --- START THE INTERNET HERE ---
     start_session(ip); 
-    
-    ip_napt_enable(my_ap_ip, 1);
-    
-    esp_netif_dns_info_t dns;
-    if (esp_netif_get_dns_info(wifiSTA, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK) {
-        esp_netif_set_dns_info(wifiAP, ESP_NETIF_DNS_MAIN, &dns);
+
+    if (!ap_connect) {
+        const char *waiting_html =
+            "<!DOCTYPE html><html><head><title>Connecting...</title>"
+            "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
+            "<meta http-equiv='refresh' content='3;url=/confirm'>"
+            "<style>"
+            "body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; "
+            "background: #F5F0EB; color: #521B1B; display: flex; align-items: center; justify-content: center; "
+            "min-height: 100vh; margin: 0; padding: 24px; box-sizing: border-box; }"
+            ".card { width: 100%; max-width: 420px; background: #fff; border-radius: 24px; padding: 32px; "
+            "box-shadow: 0 10px 40px rgba(82, 27, 27, 0.1); text-align: center; }"
+            "h1 { font-size: 26px; margin: 0 0 12px; }"
+            "p { line-height: 1.6; margin: 0; }"
+            "</style></head><body>"
+            "<div class='card'>"
+            "<h1>Connecting to the internet...</h1>"
+            "<p>Your device is authenticated, but the ESP32 is still connecting to the upstream Wi-Fi network. "
+            "This page will retry automatically in a few seconds.</p>"
+            "</div></body></html>";
+
+        httpd_resp_send(req, waiting_html, HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
     }
+
+    if (ensure_napt_enabled() != ESP_OK) {
+        const char *error_html =
+            "<!DOCTYPE html><html><head><title>Routing Error</title>"
+            "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
+            "<style>"
+            "body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; "
+            "background: #F5F0EB; color: #521B1B; display: flex; align-items: center; justify-content: center; "
+            "min-height: 100vh; margin: 0; padding: 24px; box-sizing: border-box; }"
+            ".card { width: 100%; max-width: 420px; background: #fff; border-radius: 24px; padding: 32px; "
+            "box-shadow: 0 10px 40px rgba(82, 27, 27, 0.1); text-align: center; }"
+            "h1 { font-size: 26px; margin: 0 0 12px; }"
+            "p { line-height: 1.6; margin: 0; }"
+            "</style></head><body>"
+            "<div class='card'>"
+            "<h1>Internet routing is not available yet</h1>"
+            "<p>The ESP32 authenticated your device but failed to enable NAT routing to the uplink. "
+            "Check the serial logs for the NAPT error.</p>"
+            "</div></body></html>";
+
+        httpd_resp_send(req, error_html, HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
+    // DNS stays pointed at the ESP32 so we can hijack unauthenticated lookups
+    // and forward authenticated ones upstream.
     // -------------------------------
 
     int remaining_seconds = get_remaining_seconds(ip);
@@ -488,8 +633,9 @@ httpd_handle_t start_webserver(void)
     init_sessions();
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 15;
+    config.max_uri_handlers = 20;
     config.stack_size = 8192;
+    config.uri_match_fn = httpd_uri_match_wildcard;
     esp_timer_create(&restart_timer_args, &restart_timer);
 
     const char* config_page_template = CONFIG_PAGE;
@@ -519,18 +665,32 @@ httpd_handle_t start_webserver(void)
     httpd_register_uri_handler(server, &admin_uri);
     httpd_uri_t gen_204_uri = { .uri = "/generate_204", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &gen_204_uri);
+    httpd_uri_t gen_204_alt_uri = { .uri = "/gen_204", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &gen_204_alt_uri);
     httpd_uri_t connectivity_check_uri = { .uri = "/connectivity-check.html", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &connectivity_check_uri);
     httpd_uri_t hotspot_uri = { .uri = "/hotspot-detect.html", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &hotspot_uri);
+    httpd_uri_t apple_success_uri = { .uri = "/library/test/success.html", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &apple_success_uri);
+    httpd_uri_t windows_connecttest_uri = { .uri = "/connecttest.txt", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &windows_connecttest_uri);
+    httpd_uri_t windows_ncsi_uri = { .uri = "/ncsi.txt", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &windows_ncsi_uri);
+    httpd_uri_t windows_redirect_uri = { .uri = "/redirect", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &windows_redirect_uri);
+    httpd_uri_t microsoft_fwlink_uri = { .uri = "/fwlink", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &microsoft_fwlink_uri);
     httpd_uri_t cea_uri = { .uri = "/cea.png", .method = HTTP_GET, .handler = img_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &cea_uri);
     httpd_uri_t phone_uri = { .uri = "/dashboard.png", .method = HTTP_GET, .handler = img_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &phone_uri);
     httpd_uri_t dash_uri = { .uri = "/dashboard-ui.png", .method = HTTP_GET, .handler = img_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &dash_uri);
-    httpd_uri_t catch_all_uri = { .uri = "/*", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_uri_t catch_all_uri = { .uri = "/*", .method = HTTP_GET, .handler = catch_all_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &catch_all_uri);
+    httpd_uri_t catch_all_head_uri = { .uri = "/*", .method = HTTP_HEAD, .handler = catch_all_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &catch_all_head_uri);
 
     return server;
 }
