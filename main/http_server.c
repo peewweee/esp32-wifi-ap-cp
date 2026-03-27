@@ -8,6 +8,7 @@
  */
 #include <stdio.h>
 #include <errno.h>
+#include <string.h>
 #include <sys/stat.h>
 #include "esp_spiffs.h"
 
@@ -26,8 +27,12 @@
 
 #include "pages.h"
 #include "net_diag.h"
+#include "supabase_client.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_timer.h"
 #include "mbedtls/base64.h" // Required for decoding the password
+#include "mbedtls/sha256.h"
 
 static const char *TAG_WEB = "CAPTIVE_PORTAL";
 static const char *TAG_ADMIN = "ADMIN_SERVER";
@@ -46,6 +51,9 @@ static const char *TAG_ADMIN = "ADMIN_SERVER";
 // --- PER-DEVICE SESSION STRUCTURE ---
 typedef struct {
     uint32_t ip_addr;       // The client's IP address
+    uint8_t mac[6];         // The client's MAC address
+    char token[17];         // The Supabase/dashboard token
+    char mac_hash[65];      // Full SHA-256 hex digest used for Supabase
     int64_t end_time;       // When their session expires (internal ESP time)
     bool active;            // Is this slot in use?
 } client_session_t;
@@ -53,6 +61,7 @@ typedef struct {
 static client_session_t sessions[MAX_CLIENTS];
 static bool s_napt_enabled;
 static int64_t s_global_session_end_time;
+static bool s_heartbeat_task_started;
 
 // --- FORWARD DECLARATIONS ---
 int get_remaining_seconds(uint32_t ip);
@@ -63,6 +72,15 @@ static esp_err_t send_redirect_to_portal(httpd_req_t *req);
 static esp_err_t send_probe_success(httpd_req_t *req);
 static esp_err_t ensure_napt_enabled(void);
 static int get_global_remaining_seconds(void);
+static client_session_t *start_or_resume_session(uint32_t ip, const uint8_t *mac, const char *token, const char *mac_hash);
+static bool get_client_mac_for_ip(uint32_t ip, uint8_t mac_out[6]);
+static bool get_any_connected_client_mac(uint8_t mac_out[6]);
+static void generate_token_from_ip(uint32_t ip, char token_out[17]);
+static void generate_hash_from_mac(const uint8_t mac[6], char mac_hash_out[65], char token_out[17]);
+static void generate_hash_from_ip(uint32_t ip, char mac_hash_out[65], char token_out[17]);
+static void ensure_heartbeat_task_started(void);
+static void supabase_heartbeat_task(void *pvParameters);
+static void refresh_portal_auth_state(const char *reason);
 
 esp_timer_handle_t restart_timer;
 
@@ -81,7 +99,283 @@ esp_timer_create_args_t restart_timer_args = {
 // --- SESSION MANAGER FUNCTIONS ---
 
 void init_sessions() {
-    for(int i=0; i<MAX_CLIENTS; i++) sessions[i].active = false;
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        memset(&sessions[i], 0, sizeof(sessions[i]));
+    }
+}
+
+static int find_session_index_by_ip(uint32_t ip)
+{
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (sessions[i].active && sessions[i].ip_addr == ip) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int find_session_index_by_token(const char *token)
+{
+    if (token == NULL || token[0] == '\0') {
+        return -1;
+    }
+
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (sessions[i].active && strcmp(sessions[i].token, token) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int find_free_session_slot(void)
+{
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (!sessions[i].active) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void refresh_portal_auth_state(const char *reason)
+{
+    bool has_active_session = false;
+    int64_t now = esp_timer_get_time();
+
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (!sessions[i].active) {
+            continue;
+        }
+
+        if (sessions[i].end_time > 0 && sessions[i].end_time <= now) {
+            sessions[i].active = false;
+            continue;
+        }
+
+        has_active_session = true;
+    }
+
+    if (s_global_session_end_time > 0 && s_global_session_end_time <= now) {
+        s_global_session_end_time = 0;
+    }
+
+    portal_authenticated = has_active_session || (s_global_session_end_time > now);
+    net_diag_set_portal_state(portal_authenticated, reason);
+}
+
+static void digest_to_hex(const uint8_t digest[32], char hex_out[65], char token_out[17])
+{
+    if (digest == NULL || hex_out == NULL) {
+        return;
+    }
+
+    for (int i = 0; i < 32; i++) {
+        snprintf(&hex_out[i * 2], 3, "%02x", digest[i]);
+    }
+    hex_out[64] = '\0';
+
+    if (token_out != NULL) {
+        memcpy(token_out, hex_out, 16);
+        token_out[16] = '\0';
+    }
+}
+
+void generate_token_from_mac(const uint8_t mac[6], char token_out[17])
+{
+    char ignored_hash[65];
+
+    if (mac == NULL || token_out == NULL) {
+        return;
+    }
+
+    generate_hash_from_mac(mac, ignored_hash, token_out);
+}
+
+static void generate_hash_from_mac(const uint8_t mac[6], char mac_hash_out[65], char token_out[17])
+{
+    uint8_t digest[32];
+
+    if (mac == NULL || mac_hash_out == NULL) {
+        return;
+    }
+
+    mbedtls_sha256(mac, 6, digest, 0);
+    digest_to_hex(digest, mac_hash_out, token_out);
+}
+
+static void generate_token_from_ip(uint32_t ip, char token_out[17])
+{
+    char ignored_hash[65];
+
+    if (token_out == NULL) {
+        return;
+    }
+
+    generate_hash_from_ip(ip, ignored_hash, token_out);
+}
+
+static void generate_hash_from_ip(uint32_t ip, char mac_hash_out[65], char token_out[17])
+{
+    uint8_t digest[32];
+    uint8_t ip_bytes[4];
+
+    if (mac_hash_out == NULL) {
+        return;
+    }
+
+    memcpy(ip_bytes, &ip, sizeof(ip_bytes));
+    mbedtls_sha256(ip_bytes, sizeof(ip_bytes), digest, 0);
+    digest_to_hex(digest, mac_hash_out, token_out);
+}
+
+static bool get_any_connected_client_mac(uint8_t mac_out[6])
+{
+    wifi_sta_list_t sta_list = {0};
+
+    if (mac_out == NULL) {
+        return false;
+    }
+
+    if (esp_wifi_ap_get_sta_list(&sta_list) != ESP_OK || sta_list.num <= 0) {
+        return false;
+    }
+
+    memcpy(mac_out, sta_list.sta[0].mac, 6);
+    return true;
+}
+
+static bool get_client_mac_for_ip(uint32_t ip, uint8_t mac_out[6])
+{
+    wifi_sta_list_t sta_list = {0};
+    esp_netif_pair_mac_ip_t mac_ip_pair[MAX_CLIENTS] = {0};
+    int pair_count;
+    esp_err_t err;
+
+    if (ip == 0 || mac_out == NULL) {
+        return false;
+    }
+
+    err = esp_wifi_ap_get_sta_list(&sta_list);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG_WEB, "Failed to get AP station list: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    pair_count = sta_list.num < MAX_CLIENTS ? sta_list.num : MAX_CLIENTS;
+    if (pair_count <= 0) {
+        return false;
+    }
+
+    for (int i = 0; i < pair_count; i++) {
+        memcpy(mac_ip_pair[i].mac, sta_list.sta[i].mac, sizeof(mac_ip_pair[i].mac));
+    }
+
+    err = esp_netif_dhcps_get_clients_by_mac(wifiAP, pair_count, mac_ip_pair);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG_WEB, "Failed to map DHCP clients to MAC addresses: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    for (int i = 0; i < pair_count; i++) {
+        if (mac_ip_pair[i].ip.addr == ip) {
+            memcpy(mac_out, mac_ip_pair[i].mac, 6);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static client_session_t *start_or_resume_session(uint32_t ip, const uint8_t *mac, const char *token, const char *mac_hash)
+{
+    int64_t now = esp_timer_get_time();
+    int session_index = -1;
+
+    if (ip == 0) {
+        s_global_session_end_time = now + SESSION_DURATION_US;
+        refresh_portal_auth_state("portal_accept_global");
+        if (token == NULL || token[0] == '\0') {
+            ESP_LOGW(TAG_WEB, "Client IP lookup failed; using global session fallback");
+            net_diag_log_snapshot("session_global_fallback");
+            net_diag_schedule_probe("portal_accept");
+            return NULL;
+        }
+
+        session_index = find_session_index_by_token(token);
+    } else {
+        session_index = find_session_index_by_ip(ip);
+    }
+
+    if (session_index >= 0) {
+        if (sessions[session_index].end_time > now) {
+            if (mac != NULL) {
+                memcpy(sessions[session_index].mac, mac, 6);
+            }
+            if (token != NULL && token[0] != '\0') {
+                strlcpy(sessions[session_index].token, token, sizeof(sessions[session_index].token));
+            }
+            if (mac_hash != NULL && mac_hash[0] != '\0') {
+                strlcpy(sessions[session_index].mac_hash, mac_hash, sizeof(sessions[session_index].mac_hash));
+            }
+            refresh_portal_auth_state("session_reused");
+            ESP_LOGI(TAG_WEB, "Session exists for IP %lu. Keeping existing time.", ip);
+            net_diag_log_snapshot("session_reused");
+            return &sessions[session_index];
+        }
+
+        sessions[session_index].active = false;
+    }
+
+    session_index = find_session_index_by_token(token);
+    if (session_index >= 0) {
+        sessions[session_index].ip_addr = ip;
+        if (mac != NULL) {
+            memcpy(sessions[session_index].mac, mac, 6);
+        }
+        if (mac_hash != NULL && mac_hash[0] != '\0') {
+            strlcpy(sessions[session_index].mac_hash, mac_hash, sizeof(sessions[session_index].mac_hash));
+        }
+        sessions[session_index].end_time = now + SESSION_DURATION_US;
+        sessions[session_index].active = true;
+        if (ip != 0) {
+            s_global_session_end_time = 0;
+        }
+        refresh_portal_auth_state("session_resumed_by_token");
+        net_diag_log_snapshot("session_resumed_by_token");
+        net_diag_schedule_probe("portal_accept");
+        return &sessions[session_index];
+    }
+
+    session_index = find_free_session_slot();
+    if (session_index < 0) {
+        session_index = 0;
+        memset(&sessions[session_index], 0, sizeof(sessions[session_index]));
+        net_diag_log_snapshot("session_overwrite_slot0");
+    }
+
+    sessions[session_index].ip_addr = ip;
+    sessions[session_index].end_time = now + SESSION_DURATION_US;
+    sessions[session_index].active = true;
+    if (mac != NULL) {
+        memcpy(sessions[session_index].mac, mac, 6);
+    }
+    if (token != NULL) {
+        strlcpy(sessions[session_index].token, token, sizeof(sessions[session_index].token));
+    }
+    if (mac_hash != NULL) {
+        strlcpy(sessions[session_index].mac_hash, mac_hash, sizeof(sessions[session_index].mac_hash));
+    }
+
+    if (ip != 0) {
+        s_global_session_end_time = 0;
+    }
+    refresh_portal_auth_state("session_started");
+    ESP_LOGI(TAG_WEB, "Starting session for IP: %lu token=%s", ip,
+             sessions[session_index].token[0] != '\0' ? sessions[session_index].token : "(none)");
+    net_diag_log_snapshot("session_started");
+    net_diag_schedule_probe("portal_accept");
+    return &sessions[session_index];
 }
 
 static esp_err_t ensure_napt_enabled(void)
@@ -111,8 +405,7 @@ static int get_global_remaining_seconds(void)
 
     if (remaining <= 0) {
         s_global_session_end_time = 0;
-        portal_authenticated = false;
-        net_diag_set_portal_state(false, "global_session_expired");
+        refresh_portal_auth_state("global_session_expired");
         return -1;
     }
 
@@ -131,23 +424,22 @@ uint32_t get_client_ip(httpd_req_t *req) {
 }
 
 int get_remaining_seconds(uint32_t ip) {
-    int global_remaining = get_global_remaining_seconds();
-    if (global_remaining > 0) {
-        return global_remaining;
-    }
-
     int64_t now = esp_timer_get_time();
-    for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (sessions[i].active && sessions[i].ip_addr == ip) {
-            int64_t remaining = sessions[i].end_time - now;
-            if (remaining <= 0) {
-                sessions[i].active = false; 
-                return -1;
+    if (ip != 0) {
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            if (sessions[i].active && sessions[i].ip_addr == ip) {
+                int64_t remaining = sessions[i].end_time - now;
+                if (remaining <= 0) {
+                    sessions[i].active = false;
+                    refresh_portal_auth_state("session_expired");
+                    return -1;
+                }
+                return (int)(remaining / 1000000LL);
             }
-            return (int)(remaining / 1000000LL);
         }
     }
-    return -1; 
+
+    return get_global_remaining_seconds();
 }
 
 bool is_client_session_active(uint32_t ip_addr)
@@ -156,50 +448,90 @@ bool is_client_session_active(uint32_t ip_addr)
 }
 
 void start_session(uint32_t ip) {
-    int64_t now = esp_timer_get_time();
-    s_global_session_end_time = now + SESSION_DURATION_US;
-    portal_authenticated = true;
-    net_diag_set_portal_state(true, "portal_accept");
-    
-    // Check if user already exists
+    start_or_resume_session(ip, NULL, NULL, NULL);
+}
+
+void handle_client_disconnect(const uint8_t mac[6])
+{
+    char token[17] = {0};
+
+    if (mac == NULL) {
+        return;
+    }
+
+    generate_token_from_mac(mac, token);
+    ESP_LOGI(TAG_WEB, "Handling AP disconnect for token %s", token);
+
     for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (sessions[i].active && sessions[i].ip_addr == ip) {
-            // If session exists and has time left, DO NOT reset it.
-            if (sessions[i].end_time > now) {
-                ESP_LOGI(TAG_WEB, "Session exists for IP %lu. Keeping existing time.", ip);
-                net_diag_log_snapshot("session_reused");
-                return; 
-            }
-            break;
+        if (!sessions[i].active) {
+            continue;
+        }
+
+        if (memcmp(sessions[i].mac, mac, 6) == 0 || strcmp(sessions[i].token, token) == 0) {
+            sessions[i].active = false;
         }
     }
 
-    if (ip == 0) {
-        ESP_LOGW(TAG_WEB, "Client IP lookup failed; using global session fallback");
-        net_diag_log_snapshot("session_global_fallback");
-        net_diag_schedule_probe("portal_accept");
-        return;
-    }
-    
-    // Create new session
-    for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (!sessions[i].active) {
-            sessions[i].ip_addr = ip;
-            sessions[i].end_time = now + SESSION_DURATION_US;
-            sessions[i].active = true;
-            ESP_LOGI(TAG_WEB, "Starting NEW session for IP: %lu", ip);
-            net_diag_log_snapshot("session_started");
-            net_diag_schedule_probe("portal_accept");
-            return;
+    refresh_portal_auth_state("ap_client_disconnected");
+
+    if (token[0] != '\0') {
+        esp_err_t err = supabase_mark_disconnected(token);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG_WEB, "Failed to mark token %s disconnected in Supabase: %s",
+                     token, esp_err_to_name(err));
         }
     }
-    
-    // Fallback: overwrite first slot
-    sessions[0].ip_addr = ip;
-    sessions[0].end_time = now + SESSION_DURATION_US;
-    sessions[0].active = true;
-    net_diag_log_snapshot("session_overwrite_slot0");
-    net_diag_schedule_probe("portal_accept");
+}
+
+static void supabase_heartbeat_task(void *pvParameters)
+{
+    (void)pvParameters;
+
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(30000));
+
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            int remaining;
+
+            if (!sessions[i].active || sessions[i].token[0] == '\0') {
+                continue;
+            }
+
+            remaining = get_remaining_seconds(sessions[i].ip_addr);
+            if (remaining > 0) {
+                esp_err_t err = supabase_update_heartbeat(sessions[i].token, remaining);
+                if (err != ESP_OK) {
+                    ESP_LOGW(TAG_WEB, "Heartbeat failed for token %s: %s",
+                             sessions[i].token, esp_err_to_name(err));
+                }
+                continue;
+            }
+
+            ESP_LOGI(TAG_WEB, "Session expired for token %s", sessions[i].token);
+            supabase_update_heartbeat(sessions[i].token, 0);
+            sessions[i].active = false;
+            refresh_portal_auth_state("session_expired_heartbeat");
+        }
+    }
+}
+
+static void ensure_heartbeat_task_started(void)
+{
+    if (s_heartbeat_task_started) {
+        return;
+    }
+
+    if (xTaskCreate(supabase_heartbeat_task,
+                    "supabase_heartbeat",
+                    6144,
+                    NULL,
+                    tskIDLE_PRIORITY + 1,
+                    NULL) == pdPASS) {
+        s_heartbeat_task_started = true;
+        ESP_LOGI(TAG_WEB, "Supabase heartbeat task started");
+    } else {
+        ESP_LOGE(TAG_WEB, "Failed to start Supabase heartbeat task");
+    }
 }
 
 char* html_escape(const char* src) {
@@ -495,10 +827,38 @@ static esp_err_t catch_all_handler(httpd_req_t *req)
 static esp_err_t confirm_handler(httpd_req_t *req)
 {
     uint32_t ip = get_client_ip(req);
+    uint8_t client_mac[6] = {0};
+    bool have_mac = false;
+    char token[17] = {0};
+    char mac_hash[65] = {0};
+    client_session_t *session;
+    const char *session_token;
+    const char *session_mac_hash;
+    const char *dashboard_url;
+    char dashboard_url_buf[128];
     net_diag_log_snapshot("confirm_handler");
-    
+
+    have_mac = get_client_mac_for_ip(ip, client_mac);
+    if (!have_mac && get_any_connected_client_mac(client_mac)) {
+        have_mac = true;
+        ESP_LOGW(TAG_WEB, "Falling back to the first connected AP client MAC for /confirm");
+    }
+
+    if (have_mac) {
+        generate_hash_from_mac(client_mac, mac_hash, token);
+    } else if (ip != 0) {
+        ip4_addr_t ip_addr = { .addr = ip };
+        generate_hash_from_ip(ip, mac_hash, token);
+        ESP_LOGW(TAG_WEB, "Falling back to IP-derived token/hash for client " IPSTR, IP2STR(&ip_addr));
+    } else {
+        ESP_LOGW(TAG_WEB, "Unable to derive token/hash for /confirm; dashboard link will omit token");
+    }
+
     // --- START THE INTERNET HERE ---
-    start_session(ip); 
+    session = start_or_resume_session(ip,
+                                      have_mac ? client_mac : NULL,
+                                      token[0] != '\0' ? token : NULL,
+                                      mac_hash[0] != '\0' ? mac_hash : NULL);
 
     if (!ap_connect) {
         const char *waiting_html =
@@ -553,6 +913,38 @@ static esp_err_t confirm_handler(httpd_req_t *req)
     int remaining_seconds = get_remaining_seconds(ip);
     if (remaining_seconds < 0) remaining_seconds = 0;
 
+    session_token = (session != NULL && session->token[0] != '\0') ? session->token : (token[0] != '\0' ? token : NULL);
+    session_mac_hash = (session != NULL && session->mac_hash[0] != '\0') ? session->mac_hash : (mac_hash[0] != '\0' ? mac_hash : NULL);
+
+    if (session_token != NULL && session_mac_hash != NULL) {
+        ESP_LOGI(TAG_WEB, "Syncing portal session to Supabase with token %s", session_token);
+        esp_err_t sync_err = supabase_create_session(session_token,
+                                                     session_mac_hash,
+                                                     remaining_seconds > 0 ? remaining_seconds : SESSION_DURATION_SEC);
+        if (sync_err == ESP_ERR_INVALID_STATE) {
+            sync_err = supabase_update_heartbeat(session_token, remaining_seconds);
+        }
+
+        if (sync_err != ESP_OK) {
+            ESP_LOGW(TAG_WEB, "Failed to sync session %s to Supabase: %s",
+                     session_token, esp_err_to_name(sync_err));
+        }
+    } else {
+        ESP_LOGW(TAG_WEB, "Skipping Supabase sync because token or mac_hash is missing");
+    }
+
+    if (session != NULL && session->token[0] != '\0') {
+        snprintf(dashboard_url_buf, sizeof(dashboard_url_buf),
+                 "https://spcs-v1.vercel.app/dashboard?token=%s", session->token);
+        dashboard_url = dashboard_url_buf;
+    } else if (token[0] != '\0') {
+        snprintf(dashboard_url_buf, sizeof(dashboard_url_buf),
+                 "https://spcs-v1.vercel.app/dashboard?token=%s", token);
+        dashboard_url = dashboard_url_buf;
+    } else {
+        dashboard_url = "https://spcs-v1.vercel.app/dashboard";
+    }
+
     // Increased buffer size for the advanced responsive CSS
     char *resp_str = malloc(8192); 
     if (resp_str == NULL) {
@@ -593,14 +985,14 @@ static esp_err_t confirm_handler(httpd_req_t *req)
     "      </div>"
     "      <div class='right-col'>"
     "        <h2>Explore the dashboard</h2>"
-    "        <a href='https://spcs-v1.vercel.app?connected=true&seconds=%d' target='_blank' class='btn'>Solar-Powered Bench</a>"
+    "        <a href='%s' target='_blank' class='btn'>Solar-Powered Bench</a>"
     "        <img src='/dashboard-ui.png' class='d-img'/>"
     "      </div>"
     "    </div>"
     "  </div>"
     "</div>"
     "</body></html>",
-    remaining_seconds
+    dashboard_url
     );
 
     httpd_resp_send(req, resp_str, strlen(resp_str));
@@ -631,6 +1023,8 @@ static esp_err_t img_handler(httpd_req_t *req)
 httpd_handle_t start_webserver(void)
 {
     init_sessions();
+    supabase_init();
+    ensure_heartbeat_task_started();
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 20;

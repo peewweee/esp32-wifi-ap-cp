@@ -6,6 +6,7 @@ build/**
 !build/esp32s3
 !build/esp32s3/*
 .pio*
+.env
 .vscode
 .vscode/*
 sdkconfig.*
