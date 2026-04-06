@@ -1,6 +1,6 @@
 # Project Context
 
-Last reviewed: 2026-03-27
+Last reviewed: 2026-04-07
 
 Review basis:
 - Current workspace contents, not just the last commit
@@ -9,13 +9,34 @@ Review basis:
 - Current SPIFFS assets under `spiffs_image/`
 
 Current workspace note:
-- The current worktree has local modifications in `main/esp32_nat_router.c`, `main/http_server.c`, `main/CMakeLists.txt`, and `components/cmd_router/router_globals.h`
-- The current worktree also contains new `main/dns_server.c` and `main/dns_server.h`
-- This document reflects that current local state
+- The current worktree is clean according to `git status --short`
+- This document reflects the currently checked out codebase plus the thesis/product framing provided on 2026-04-07
+
+## Thesis/Product Framing
+
+The intended system-level identity of this project is:
+- Thesis title: `Development and Implementation of Solar-Powered Smart Charging Station with Integrated Connectivity`
+- User-facing station/SSID brand: `SOLAR CONNECT`
+- Product concept: `The Smart Solar Hub`
+
+At the thesis level, the full system spans four layers:
+- `Power layer`
+  Solar panel, LiFePO4 battery, charging hardware, inverter, and energy distribution
+- `Embedded control layer`
+  ESP32 firmware for AP+STA networking, captive portal, session timing, and remote service handoff
+- `Access/security layer`
+  Captive portal acceptance flow and planned RFID-assisted physical activation
+- `User application layer`
+  A Vercel-hosted PWA/dashboard for transparency, session visibility, and station information
+
+Important repo boundary:
+- This repository currently implements the ESP32 networking/router/captive-portal firmware
+- The Vercel PWA is referenced from this firmware, but its source code is not present here
+- The solar charging electronics, port current sensing, RFID activation logic, and eco-metric calculations described in the thesis framing are not yet implemented in this repository
 
 ## Project Summary
 
-This repository contains ESP32 firmware for a Wi-Fi NAT router / captive portal device.
+This repository contains ESP32 firmware for the connectivity subsystem of the Smart Solar Hub thesis project.
 
 The current firmware combines:
 - A SoftAP that is always exposed to clients
@@ -30,7 +51,8 @@ The current user-facing branding is `SOLAR CONNECT`.
 Important product-level framing:
 - The current root web experience is a captive portal at `/`
 - The configuration UI still exists, but it now lives at `/config`
-- The repository started from the ESP-IDF console example and an ESP32 NAT router example, then added a custom captive portal flow and branding
+- The repository started from the ESP-IDF console example and an ESP32 NAT router example, then added a custom captive portal flow, diagnostics, Supabase sync, Vercel handoff, and Smart Solar Hub branding
+- In the broader thesis architecture, this repo should be treated as the connectivity and session-management firmware, not as the whole charging-station stack
 
 ## Repository Layout
 
@@ -38,9 +60,13 @@ Main authored areas:
 - `main/esp32_nat_router.c`
   App entrypoint, NVS and SPIFFS init, Wi-Fi/AP+STA setup, event handlers, NAT/portmap helpers, LED thread, console loop, web/DNS startup
 - `main/http_server.c`
-  Captive portal HTTP server, admin config page, per-client session tracking, captive-probe handling, SPIFFS image serving
+  Captive portal HTTP server, admin config page, per-client session tracking, captive-probe handling, SPIFFS image serving, dashboard handoff, Supabase session sync
 - `main/dns_server.c`
   Custom UDP DNS server used for captive portal DNS hijacking and upstream DNS forwarding
+- `main/net_diag.c`
+  Runtime network diagnostics, NAPT state logging, and active connectivity probes
+- `main/supabase_client.c`
+  REST integration for remote session creation, heartbeat updates, and disconnect status
 - `main/pages.h`
   Embedded HTML for the legacy config/admin page and an unused lock page
 - `components/cmd_router/cmd_router.c`
@@ -65,6 +91,11 @@ Other notable files:
   Standalone mock/prototype of the current "connected" page visual design
 - `spiffs_image/`
   Image assets flashed into the SPIFFS `storage` partition
+
+External-but-coupled systems not stored in this repo:
+- The Vercel PWA reached through `https://spcs-v1.vercel.app/dashboard`
+- The Supabase backend configured through `.env` or CMake cache variables
+- The physical solar/charging/RFID subsystem described in the thesis narrative
 
 Generated or vendor-managed areas:
 - `build/`
@@ -92,6 +123,7 @@ Important runtime facts:
 - STA uplink is optional and depends on saved STA credentials
 - NAT is intentionally not enabled during boot
 - NAT is enabled later from the captive portal `/confirm` path
+- The current firmware is therefore optimized around `managed Wi-Fi access`, not direct charging-port control
 
 ## Networking Model
 
@@ -130,6 +162,7 @@ Per-client session model:
 - Maximum tracked clients is 20
 - Session duration is currently hard-coded to `60` seconds
 - Existing active sessions are not extended when `/confirm` is visited again
+- A MAC-derived token and hash are also generated to sync the session outward to Supabase and the dashboard
 
 Captive portal HTTP flow:
 - `/`
@@ -207,6 +240,12 @@ Branding and handoff:
 - The connected page links out to:
   `https://spcs-v1.vercel.app?connected=true&seconds=<remaining>`
 
+How this maps to the thesis user flows:
+- `User Flow A: On-site network connectivity`
+  This is the main implemented path in the current repo. Users join the SoftAP, are intercepted by captive DNS/HTTP, accept terms on `/`, and are sent through `/confirm` into a timed session plus dashboard handoff.
+- `User Flow B: Remote/offline dashboard access`
+  This is only represented indirectly here. The firmware generates dashboard URLs and syncs session state to Supabase, but the actual context-aware remote dashboard behavior lives outside this repository.
+
 ## Persistent Configuration
 
 Primary namespace:
@@ -253,6 +292,10 @@ Default behavior when keys are missing:
 - `ap_ip` defaults to `192.168.4.1`
 - `lock` defaults to `"0"`
 
+External configuration:
+- Supabase base URL and API key are injected through top-level `CMakeLists.txt`, optionally loaded from a local `.env`
+- The checked-in default API key is still a placeholder, so remote session sync will not work until a real key is supplied
+
 ## CLI Surface
 
 Router commands from `cmd_router`:
@@ -298,7 +341,7 @@ Build systems present:
 Current CMake wiring:
 - Top-level `CMakeLists.txt` calls `spiffs_create_partition_image(storage spiffs_image FLASH_IN_PROJECT)`
 - `main/CMakeLists.txt` currently registers:
-  `esp32_nat_router.c`, `http_server.c`, and `dns_server.c`
+  `esp32_nat_router.c`, `http_server.c`, `dns_server.c`, `net_diag.c`, and `supabase_client.c`
 
 PlatformIO:
 - `src_dir = main`
@@ -350,6 +393,8 @@ What those files represent today:
 Documentation drift:
 - `README.md` still describes the old web-config-at-root behavior
 - The live root route is now the captive portal, not the admin config page
+- The repository currently documents a connectivity-focused firmware, while the thesis framing describes a larger smart charging station platform
+- Hardware features in the thesis narrative such as RFID activation, charging-port telemetry, eco-gamification, and announcement delivery are not represented in code in this repo
 
 Security issues:
 - Admin HTTP credentials are hard-coded in source as `admin` / `admin123`
@@ -361,6 +406,7 @@ Session enforcement limitations:
 - Session tracking is per client IP in RAM only
 - NAT is enabled globally and never disabled, so the access-control model is incomplete
 - `/confirm` starts the session timer before confirming uplink readiness, so time can be consumed while the ESP32 is still waiting for upstream Wi-Fi
+- The code does not currently enforce a true `1 hour per day per user/device` quota across reboots or days
 
 Admin/config limitations:
 - The config page displays Enterprise and static IP fields, but the handler does not persist them from web submissions
@@ -372,16 +418,28 @@ Implementation quirks to keep in mind:
 - `LOCK_PAGE` is present but unused
 - `wifi_init()` waits on an event bit before `esp_wifi_start()`, so that wait does not currently gate startup in a meaningful way
 
+Thesis alignment gaps:
+- No RFID module code or MFRC522 integration is present
+- No charging-port availability detection or current sensing is present
+- No battery, solar, or inverter telemetry is present
+- No on-device CO2-savings or gamification logic is present
+- No local API for structured station metrics exists beyond `/api/status`
+
 ## Useful Mental Model
 
-The current project is best understood as four overlapping systems:
+The current project is best understood as five overlapping systems:
+- Smart Solar Hub connectivity firmware
 - Router firmware and Wi-Fi/NAT control
 - Captive portal and DNS/HTTP interception
+- Session sync and external dashboard handoff
 - Configuration and persistence through NVS plus serial CLI
-- Branding/UI assets for the portal and connected page
 
-When changing behavior, check all four surfaces:
+When changing behavior, check these surfaces:
 - Runtime logic in `main/`
 - Persistence and commands in `components/cmd_router/`
 - SPIFFS assets and hard-coded HTML
+- External dashboard/backend assumptions
 - README and context docs, which currently lag behind implementation
+
+Also check the system boundary:
+- If a requested feature belongs to charging hardware, RFID, eco-metrics, or dashboard UI behavior, verify whether it belongs in this firmware repo, the remote PWA/backend, or a separate hardware-control layer before implementing it
