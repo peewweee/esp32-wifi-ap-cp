@@ -132,12 +132,6 @@ static esp_err_t perform_request(esp_http_client_method_t method,
              method == HTTP_METHOD_POST ? "POST" : "PATCH",
              path,
              status_code);
-    if (body != NULL) {
-        ESP_LOGI(TAG, "Request body: %s", body);
-    }
-    if (response_len > 0) {
-        ESP_LOGI(TAG, "Response body: %s", response_buf);
-    }
     esp_http_client_cleanup(client);
 
     if (status_code >= 200 && status_code < 300) {
@@ -182,7 +176,7 @@ esp_err_t supabase_create_session(const char *token, const char *mac_hash, int d
 
     have_time = get_valid_time(&now);
     if (!have_time) {
-        ESP_LOGW(TAG, "System clock is not set; using placeholder session_end for token %.16s", token);
+        ESP_LOGW(TAG, "System clock is not set; using placeholder session_end");
         snprintf(body, sizeof(body),
                  "{\"token\":\"%s\",\"mac_hash\":\"%s\",\"session_end\":\"2099-12-31T23:59:59Z\","
                  "\"remaining_seconds\":%d,\"status\":\"active\",\"ap_connected\":true}",
@@ -224,7 +218,7 @@ esp_err_t supabase_update_heartbeat(const char *token, int remaining_sec)
                      : "{\"remaining_seconds\":%d,\"last_heartbeat\":\"%s\",\"ap_connected\":true}",
                  safe_remaining, heartbeat);
     } else {
-        ESP_LOGW(TAG, "System clock is not set; heartbeat for token %.16s will omit last_heartbeat", token);
+        ESP_LOGW(TAG, "System clock is not set; heartbeat will omit last_heartbeat");
         snprintf(body, sizeof(body),
                  expired
                      ? "{\"remaining_seconds\":%d,\"status\":\"expired\",\"ap_connected\":true}"

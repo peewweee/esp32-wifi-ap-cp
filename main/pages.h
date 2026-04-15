@@ -65,16 +65,9 @@ color: #fff;\
 <body>\
 <div id='config'>\
 <h1>ESP32 NAT Router Config</h1>\
-<script>\
-if (window.location.search.substr(1) != '')\
-{\
-document.getElementById('config').display = 'none';\
-document.body.innerHTML ='<h1>ESP32 NAT Router Config</h1>The new settings have been sent to the device.<br/>The page will refresh soon automatically...';\
-setTimeout(\"location.href = '/'\",10000);\
-}\
-</script>\
 <h2>AP Settings (the new network)</h2>\
-<form action='' method='GET'>\
+<form action='/config' method='POST' autocomplete='off'>\
+<input type='hidden' name='action' value='save_ap'/>\
 <table>\
 <tr>\
 <td>SSID</td>\
@@ -82,7 +75,7 @@ setTimeout(\"location.href = '/'\",10000);\
 </tr>\
 <tr>\
 <td>Password</td>\
-<td><input type='text' name='ap_password' value='%s' placeholder='Password of the new network'/></td>\
+<td><input type='password' name='ap_password' value='' placeholder='Leave blank to keep current password' autocomplete='new-password'/></td>\
 </tr>\
 <tr>\
 <td></td>\
@@ -90,12 +83,13 @@ setTimeout(\"location.href = '/'\",10000);\
 </tr>\
 </table>\
 <small>\
-<i>Password </i>less than 8 chars = open<br />\
+<i>Password </i>less than 8 chars = open. Leave blank to keep the stored password.<br />\
 </small>\
 </form>\
 \
 <h2>STA Settings (uplink WiFi network)</h2>\
-<form action='' method='GET'>\
+<form action='/config' method='POST' autocomplete='off'>\
+<input type='hidden' name='action' value='save_sta'/>\
 <table>\
 <tr>\
 <td>SSID</td>\
@@ -103,7 +97,7 @@ setTimeout(\"location.href = '/'\",10000);\
 </tr>\
 <tr>\
 <td>Password</td>\
-<td><input type='text' name='password' value='%s' placeholder='Password of existing network'/></td>\
+<td><input type='password' name='password' value='' placeholder='Leave blank to keep current password' autocomplete='new-password'/></td>\
 </tr>\
 <tr>\
 <td colspan='2'>WPA2 Enterprise settings. Leave blank for regular</td>\
@@ -125,7 +119,8 @@ setTimeout(\"location.href = '/'\",10000);\
 </form>\
 \
 <h2>STA Static IP Settings</h2>\
-<form action='' method='GET'>\
+<form action='/config' method='POST'>\
+<input type='hidden' name='action' value='save_static'/>\
 <table>\
 <tr>\
 <td>Static IP</td>\
@@ -151,11 +146,12 @@ setTimeout(\"location.href = '/'\",10000);\
 </form>\
 \
 <h2>Device Management</h2>\
-<form action='' method='GET'>\
+<form action='/config' method='POST'>\
+<input type='hidden' name='action' value='reboot'/>\
 <table>\
 <tr>\
 <td>Device</td>\
-<td><input type='submit' name='reset' value='Reboot' class='red-button'/></td>\
+<td><input type='submit' value='Reboot' class='red-button'/></td>\
 </tr>\
 </table>\
 </form>\

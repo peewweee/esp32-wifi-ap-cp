@@ -45,6 +45,25 @@ static void register_set_ap_ip(void);
 static void register_show(void);
 static void register_portmap(void);
 
+static bool is_sensitive_key(const char *name)
+{
+    return name != NULL &&
+           (strcmp(name, "passwd") == 0 ||
+            strcmp(name, "ap_passwd") == 0);
+}
+
+static void mask_value(const char *value, char *out, size_t out_len)
+{
+    if (out == NULL || out_len == 0) {
+        return;
+    }
+    if (value == NULL || value[0] == '\0') {
+        strlcpy(out, "<empty>", out_len);
+        return;
+    }
+    strlcpy(out, "********", out_len);
+}
+
 void preprocess_string(char* str)
 {
     char *p, *q;
@@ -87,7 +106,15 @@ esp_err_t get_config_param_str(char* name, char** param)
         if ( (err = nvs_get_str(nvs, name, NULL, &len)) == ESP_OK) {
             *param = (char *)malloc(len);
             err = nvs_get_str(nvs, name, *param, &len);
-            ESP_LOGI(TAG, "%s %s", name, *param);
+            if (err == ESP_OK) {
+                if (is_sensitive_key(name)) {
+                    char masked[16];
+                    mask_value(*param, masked, sizeof(masked));
+                    ESP_LOGI(TAG, "%s %s", name, masked);
+                } else {
+                    ESP_LOGI(TAG, "%s %s", name, *param);
+                }
+            }
         } else {
             return err;
         }
@@ -202,7 +229,7 @@ int set_sta(int argc, char **argv)
         if (err == ESP_OK) {
             err = nvs_commit(nvs);
             if (err == ESP_OK) {
-                ESP_LOGI(TAG, "STA settings %s/%s stored.", set_sta_arg.ssid->sval[0], set_sta_arg.password->sval[0]);
+                ESP_LOGI(TAG, "STA settings stored for SSID %s.", set_sta_arg.ssid->sval[0]);
             }
         }
     }
@@ -406,7 +433,7 @@ int set_ap(int argc, char **argv)
         if (err == ESP_OK) {
             err = nvs_commit(nvs);
             if (err == ESP_OK) {
-                ESP_LOGI(TAG, "AP settings %s/%s stored.", set_ap_args.ssid->sval[0], set_ap_args.password->sval[0]);
+                ESP_LOGI(TAG, "AP settings stored for SSID %s.", set_ap_args.ssid->sval[0]);
             }
         }
     }
@@ -575,14 +602,21 @@ static int show(int argc, char **argv)
     get_config_param_str("ap_ssid", &ap_ssid);
     get_config_param_str("ap_passwd", &ap_passwd);
 
-    printf("STA SSID: %s Password: %s Enterprise: %s %s\n",
+    {
+        char masked_sta_pass[16];
+        char masked_ap_pass[16];
+        mask_value(passwd, masked_sta_pass, sizeof(masked_sta_pass));
+        mask_value(ap_passwd, masked_ap_pass, sizeof(masked_ap_pass));
+
+        printf("STA SSID: %s Password: %s Enterprise: %s %s\n",
         ssid != NULL ? ssid : "<undef>",
-        passwd != NULL ? passwd : "<undef>",
+        masked_sta_pass,
         ((ent_username != NULL) && (strlen(ent_username) > 0)) ? ent_username : "<not active>",
         ((ent_username != NULL) && (strlen(ent_username) > 0) && (ent_identity != NULL) && (strlen(ent_identity) > 0)) ? ent_identity : ""
-    );
-    printf("AP SSID: %s Password: %s\n", ap_ssid != NULL ? ap_ssid : "<undef>",
-        ap_passwd != NULL ? ap_passwd : "<undef>");
+        );
+        printf("AP SSID: %s Password: %s\n", ap_ssid != NULL ? ap_ssid : "<undef>",
+            masked_ap_pass);
+    }
     ip4_addr_t addr;
     addr.addr = my_ap_ip;
     printf("AP IP address: " IPSTR "\n", IP2STR(&addr));

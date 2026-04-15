@@ -28,6 +28,7 @@
 #include "freertos/event_groups.h"
 #include "esp_wifi.h"
 #include "esp_eap_client.h"
+#include "esp_sntp.h"
 
 #include "lwip/opt.h"
 #include "lwip/err.h"
@@ -91,6 +92,21 @@ esp_netif_t* wifiSTA;
 httpd_handle_t start_webserver(void);
 
 static const char *TAG = "ESP32 NAT router";
+static bool s_time_sync_started = false;
+
+static void ensure_time_sync_started(void)
+{
+    if (s_time_sync_started) {
+        return;
+    }
+
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_setservername(1, "time.google.com");
+    esp_sntp_init();
+    s_time_sync_started = true;
+    ESP_LOGI(TAG, "SNTP time sync started");
+}
 
 static void initialize_nvs(void)
 {
@@ -391,6 +407,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         {
             ESP_LOGI(TAG, "upstream dns:" IPSTR, IP2STR(&(dns.ip.u_addr.ip4)));
         }
+        ensure_time_sync_started();
         net_diag_log_snapshot("sta_got_ip");
         net_diag_schedule_probe("sta_got_ip");
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
