@@ -55,16 +55,21 @@ static const char *TAG_ADMIN = "ADMIN_SERVER";
 #define DAILY_QUOTA_SEC 3600
 #define SESSION_DURATION_SEC DAILY_QUOTA_SEC
 #define SESSION_DURATION_US (SESSION_DURATION_SEC * 1000000LL)
+#define SESSION_TOKEN_HEX_LEN 32
+#define SESSION_TOKEN_LEN (SESSION_TOKEN_HEX_LEN + 1)
+#define DEVICE_HASH_LEN 65
 #define QUOTA_BLOB_KEY "quota_tab_v1"
 #define QUOTA_DAY_HINT_KEY "quota_day_hint"
 #define QUOTA_FLUSH_INTERVAL_US (60 * 1000000LL)
+#define PWA_DASHBOARD_URL "https://spcs-v1.vercel.app/dashboard"
+#define PWA_LINK_URL_FORMAT PWA_DASHBOARD_URL "/link?session_token=%s"
 
 // --- PER-DEVICE SESSION STRUCTURE ---
 typedef struct {
     uint32_t ip_addr;       // The client's IP address
     uint8_t mac[6];         // The client's MAC address
-    char token[17];         // The Supabase/dashboard token
-    char mac_hash[65];      // Full SHA-256 hex digest used for Supabase
+    char token[SESSION_TOKEN_LEN];
+    char device_hash[DEVICE_HASH_LEN];
     int64_t end_time;       // When their session expires (internal ESP time)
     int64_t start_time;
     uint32_t granted_seconds;
@@ -98,12 +103,12 @@ static esp_err_t send_redirect_to_portal(httpd_req_t *req);
 static esp_err_t send_probe_success(httpd_req_t *req);
 static esp_err_t ensure_napt_enabled(void);
 static int get_global_remaining_seconds(void);
-static client_session_t *start_or_resume_session(uint32_t ip, const uint8_t *mac, const char *token, const char *mac_hash, int granted_seconds);
+static client_session_t *start_or_resume_session(uint32_t ip, const uint8_t *mac, const char *token, const char *device_hash, int granted_seconds);
 static bool get_client_mac_for_ip(uint32_t ip, uint8_t mac_out[6]);
 static bool get_any_connected_client_mac(uint8_t mac_out[6]);
-static void generate_token_from_ip(uint32_t ip, char token_out[17]);
-static void generate_hash_from_mac(const uint8_t mac[6], char mac_hash_out[65], char token_out[17]);
-static void generate_hash_from_ip(uint32_t ip, char mac_hash_out[65], char token_out[17]);
+static void generate_session_token(char token_out[SESSION_TOKEN_LEN]);
+static void generate_hash_from_mac(const uint8_t mac[6], char device_hash_out[DEVICE_HASH_LEN]);
+static void generate_hash_from_ip(uint32_t ip, char device_hash_out[DEVICE_HASH_LEN]);
 static void ensure_heartbeat_task_started(void);
 static void supabase_heartbeat_task(void *pvParameters);
 static void refresh_portal_auth_state(const char *reason);
@@ -488,69 +493,61 @@ static void maybe_disable_napt_if_idle(const char *reason)
     net_diag_set_napt_state(true, err);
 }
 
-static void digest_to_hex(const uint8_t digest[32], char hex_out[65], char token_out[17])
+static bool bytes_to_hex(const uint8_t *bytes, size_t byte_len, char *hex_out, size_t hex_out_len)
 {
-    if (digest == NULL || hex_out == NULL) {
-        return;
+    if (bytes == NULL || hex_out == NULL || hex_out_len < ((byte_len * 2) + 1)) {
+        return false;
     }
 
-    for (int i = 0; i < 32; i++) {
-        snprintf(&hex_out[i * 2], 3, "%02x", digest[i]);
+    for (size_t i = 0; i < byte_len; i++) {
+        snprintf(&hex_out[i * 2], 3, "%02x", bytes[i]);
     }
-    hex_out[64] = '\0';
-
-    if (token_out != NULL) {
-        memcpy(token_out, hex_out, 16);
-        token_out[16] = '\0';
-    }
+    hex_out[byte_len * 2] = '\0';
+    return true;
 }
 
-void generate_token_from_mac(const uint8_t mac[6], char token_out[17])
+static void generate_session_token(char token_out[SESSION_TOKEN_LEN])
 {
-    char ignored_hash[65];
-
-    if (mac == NULL || token_out == NULL) {
-        return;
-    }
-
-    generate_hash_from_mac(mac, ignored_hash, token_out);
-}
-
-static void generate_hash_from_mac(const uint8_t mac[6], char mac_hash_out[65], char token_out[17])
-{
-    uint8_t digest[32];
-
-    if (mac == NULL || mac_hash_out == NULL) {
-        return;
-    }
-
-    mbedtls_sha256(mac, 6, digest, 0);
-    digest_to_hex(digest, mac_hash_out, token_out);
-}
-
-static void generate_token_from_ip(uint32_t ip, char token_out[17])
-{
-    char ignored_hash[65];
+    uint8_t random_bytes[SESSION_TOKEN_HEX_LEN / 2];
 
     if (token_out == NULL) {
         return;
     }
 
-    generate_hash_from_ip(ip, ignored_hash, token_out);
+    esp_fill_random(random_bytes, sizeof(random_bytes));
+    if (!bytes_to_hex(random_bytes, sizeof(random_bytes), token_out, SESSION_TOKEN_LEN)) {
+        token_out[0] = '\0';
+    }
 }
 
-static void generate_hash_from_ip(uint32_t ip, char mac_hash_out[65], char token_out[17])
+static void generate_hash_from_mac(const uint8_t mac[6], char device_hash_out[DEVICE_HASH_LEN])
+{
+    uint8_t digest[32];
+
+    if (mac == NULL || device_hash_out == NULL) {
+        return;
+    }
+
+    mbedtls_sha256(mac, 6, digest, 0);
+    if (!bytes_to_hex(digest, sizeof(digest), device_hash_out, DEVICE_HASH_LEN)) {
+        device_hash_out[0] = '\0';
+    }
+}
+
+static void generate_hash_from_ip(uint32_t ip, char device_hash_out[DEVICE_HASH_LEN])
 {
     uint8_t digest[32];
     uint8_t ip_bytes[4];
 
-    if (mac_hash_out == NULL) {
+    if (device_hash_out == NULL) {
         return;
     }
 
     memcpy(ip_bytes, &ip, sizeof(ip_bytes));
     mbedtls_sha256(ip_bytes, sizeof(ip_bytes), digest, 0);
-    digest_to_hex(digest, mac_hash_out, token_out);
+    if (!bytes_to_hex(digest, sizeof(digest), device_hash_out, DEVICE_HASH_LEN)) {
+        device_hash_out[0] = '\0';
+    }
 }
 
 static bool get_any_connected_client_mac(uint8_t mac_out[6])
@@ -614,7 +611,7 @@ static bool get_client_mac_for_ip(uint32_t ip, uint8_t mac_out[6])
 static client_session_t *start_or_resume_session(uint32_t ip,
                                                  const uint8_t *mac,
                                                  const char *token,
-                                                 const char *mac_hash,
+                                                 const char *device_hash,
                                                  int granted_seconds)
 {
     int64_t now = esp_timer_get_time();
@@ -646,11 +643,11 @@ static client_session_t *start_or_resume_session(uint32_t ip,
             if (mac != NULL) {
                 memcpy(sessions[session_index].mac, mac, 6);
             }
-            if (token != NULL && token[0] != '\0') {
+            if (token != NULL && token[0] != '\0' && sessions[session_index].token[0] == '\0') {
                 strlcpy(sessions[session_index].token, token, sizeof(sessions[session_index].token));
             }
-            if (mac_hash != NULL && mac_hash[0] != '\0') {
-                strlcpy(sessions[session_index].mac_hash, mac_hash, sizeof(sessions[session_index].mac_hash));
+            if (device_hash != NULL && device_hash[0] != '\0') {
+                strlcpy(sessions[session_index].device_hash, device_hash, sizeof(sessions[session_index].device_hash));
             }
             refresh_portal_auth_state("session_reused");
             ESP_LOGI(TAG_WEB, "Session exists for IP %lu. Keeping existing time.", ip);
@@ -668,12 +665,18 @@ static client_session_t *start_or_resume_session(uint32_t ip,
         session_index = find_session_index_by_token(token);
     }
     if (session_index >= 0) {
+        memset(sessions[session_index].mac, 0, sizeof(sessions[session_index].mac));
+        sessions[session_index].token[0] = '\0';
+        sessions[session_index].device_hash[0] = '\0';
         sessions[session_index].ip_addr = ip;
         if (mac != NULL) {
             memcpy(sessions[session_index].mac, mac, 6);
         }
-        if (mac_hash != NULL && mac_hash[0] != '\0') {
-            strlcpy(sessions[session_index].mac_hash, mac_hash, sizeof(sessions[session_index].mac_hash));
+        if (token != NULL && token[0] != '\0') {
+            strlcpy(sessions[session_index].token, token, sizeof(sessions[session_index].token));
+        }
+        if (device_hash != NULL && device_hash[0] != '\0') {
+            strlcpy(sessions[session_index].device_hash, device_hash, sizeof(sessions[session_index].device_hash));
         }
         sessions[session_index].start_time = now;
         sessions[session_index].granted_seconds = (uint32_t)session_duration_sec;
@@ -697,6 +700,7 @@ static client_session_t *start_or_resume_session(uint32_t ip,
         net_diag_log_snapshot("session_overwrite_slot0");
     }
 
+    memset(&sessions[session_index], 0, sizeof(sessions[session_index]));
     sessions[session_index].ip_addr = ip;
     sessions[session_index].start_time = now;
     sessions[session_index].granted_seconds = (uint32_t)session_duration_sec;
@@ -707,11 +711,11 @@ static client_session_t *start_or_resume_session(uint32_t ip,
     if (mac != NULL) {
         memcpy(sessions[session_index].mac, mac, 6);
     }
-    if (token != NULL) {
+    if (token != NULL && token[0] != '\0') {
         strlcpy(sessions[session_index].token, token, sizeof(sessions[session_index].token));
     }
-    if (mac_hash != NULL) {
-        strlcpy(sessions[session_index].mac_hash, mac_hash, sizeof(sessions[session_index].mac_hash));
+    if (device_hash != NULL && device_hash[0] != '\0') {
+        strlcpy(sessions[session_index].device_hash, device_hash, sizeof(sessions[session_index].device_hash));
     }
 
     if (ip != 0) {
@@ -746,7 +750,7 @@ static esp_err_t ensure_napt_enabled(void)
 
 static void revoke_session(int session_index, bool disconnected, const char *reason)
 {
-    char token[17] = {0};
+    char token[SESSION_TOKEN_LEN] = {0};
     int64_t now = esp_timer_get_time();
 
     if (session_index < 0 || session_index >= MAX_CLIENTS || !sessions[session_index].active) {
@@ -851,13 +855,10 @@ void start_session(uint32_t ip) {
 
 void handle_client_disconnect(const uint8_t mac[6])
 {
-    char token[17] = {0};
-
     if (mac == NULL) {
         return;
     }
 
-    generate_token_from_mac(mac, token);
     ESP_LOGI(TAG_WEB, "Handling AP disconnect for client session");
 
     for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -865,7 +866,7 @@ void handle_client_disconnect(const uint8_t mac[6])
             continue;
         }
 
-        if (memcmp(sessions[i].mac, mac, 6) == 0 || strcmp(sessions[i].token, token) == 0) {
+        if (memcmp(sessions[i].mac, mac, 6) == 0) {
             revoke_session(i, true, "ap_client_disconnected");
         }
     }
@@ -1354,24 +1355,7 @@ static esp_err_t catch_all_handler(httpd_req_t *req)
 
 static esp_err_t send_quota_page(httpd_req_t *req)
 {
-    uint32_t ip = get_client_ip(req);
-    uint8_t client_mac[6] = {0};
-    char token[17] = {0};
-    char dashboard_url[128];
-    const char *app_url = "https://spcs-v1.vercel.app/dashboard";
     char response[2048];
-
-    if (get_client_mac_for_ip(ip, client_mac) || get_any_connected_client_mac(client_mac)) {
-        generate_token_from_mac(client_mac, token);
-    } else if (ip != 0) {
-        generate_token_from_ip(ip, token);
-    }
-
-    if (token[0] != '\0') {
-        snprintf(dashboard_url, sizeof(dashboard_url),
-                 "https://spcs-v1.vercel.app/dashboard?token=%s", token);
-        app_url = dashboard_url;
-    }
 
     snprintf(response, sizeof(response),
              "<!DOCTYPE html><html><head><title>Daily Time Used Up</title>"
@@ -1392,7 +1376,7 @@ static esp_err_t send_quota_page(httpd_req_t *req)
              "<p>You can still open the app now, and you can connect to the internet again tomorrow.</p>"
              "<a class='btn' href='%s' target='_blank'>Open Solar Connect App</a>"
              "</div></body></html>",
-             app_url);
+             PWA_DASHBOARD_URL);
 
     httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
@@ -1408,31 +1392,28 @@ static esp_err_t confirm_handler(httpd_req_t *req)
     uint32_t ip = get_client_ip(req);
     uint8_t client_mac[6] = {0};
     bool have_mac = false;
-    char token[17] = {0};
-    char mac_hash[65] = {0};
+    char token[SESSION_TOKEN_LEN] = {0};
+    char device_hash[DEVICE_HASH_LEN] = {0};
     client_session_t *session;
     const char *session_token;
-    const char *session_mac_hash;
+    const char *session_device_hash;
     const char *dashboard_url;
-    char dashboard_url_buf[128];
+    char dashboard_url_buf[192];
     char remaining_label[64];
     int granted_seconds = SESSION_DURATION_SEC;
     net_diag_log_snapshot("confirm_handler");
 
     have_mac = get_client_mac_for_ip(ip, client_mac);
-    if (!have_mac && get_any_connected_client_mac(client_mac)) {
-        have_mac = true;
-        ESP_LOGW(TAG_WEB, "Falling back to the first connected AP client MAC for /confirm");
-    }
+    generate_session_token(token);
 
     if (have_mac) {
-        generate_hash_from_mac(client_mac, mac_hash, token);
+        generate_hash_from_mac(client_mac, device_hash);
     } else if (ip != 0) {
         ip4_addr_t ip_addr = { .addr = ip };
-        generate_hash_from_ip(ip, mac_hash, token);
-        ESP_LOGW(TAG_WEB, "Falling back to IP-derived token/hash for client " IPSTR, IP2STR(&ip_addr));
+        generate_hash_from_ip(ip, device_hash);
+        ESP_LOGW(TAG_WEB, "Falling back to IP-derived device hash for client " IPSTR, IP2STR(&ip_addr));
     } else {
-        ESP_LOGW(TAG_WEB, "Unable to derive token/hash for /confirm; dashboard link will omit token");
+        ESP_LOGW(TAG_WEB, "Unable to derive device hash for /confirm; dashboard link will omit token");
     }
 
     if (have_mac) {
@@ -1454,7 +1435,7 @@ static esp_err_t confirm_handler(httpd_req_t *req)
     session = start_or_resume_session(ip,
                                       have_mac ? client_mac : NULL,
                                       token[0] != '\0' ? token : NULL,
-                                      mac_hash[0] != '\0' ? mac_hash : NULL,
+                                      device_hash[0] != '\0' ? device_hash : NULL,
                                       granted_seconds);
 
     if (!ap_connect) {
@@ -1515,12 +1496,12 @@ static esp_err_t confirm_handler(httpd_req_t *req)
              ((remaining_seconds + 59) / 60) == 1 ? "" : "s");
 
     session_token = (session != NULL && session->token[0] != '\0') ? session->token : (token[0] != '\0' ? token : NULL);
-    session_mac_hash = (session != NULL && session->mac_hash[0] != '\0') ? session->mac_hash : (mac_hash[0] != '\0' ? mac_hash : NULL);
+    session_device_hash = (session != NULL && session->device_hash[0] != '\0') ? session->device_hash : (device_hash[0] != '\0' ? device_hash : NULL);
 
-    if (session_token != NULL && session_mac_hash != NULL) {
+    if (session_token != NULL && session_device_hash != NULL) {
         ESP_LOGI(TAG_WEB, "Syncing portal session to Supabase");
         esp_err_t sync_err = supabase_create_session(session_token,
-                                                     session_mac_hash,
+                                                     session_device_hash,
                                                      remaining_seconds > 0 ? remaining_seconds : granted_seconds);
         if (sync_err == ESP_ERR_INVALID_STATE) {
             sync_err = supabase_update_heartbeat(session_token, remaining_seconds);
@@ -1531,19 +1512,19 @@ static esp_err_t confirm_handler(httpd_req_t *req)
                      esp_err_to_name(sync_err));
         }
     } else {
-        ESP_LOGW(TAG_WEB, "Skipping Supabase sync because token or mac_hash is missing");
+        ESP_LOGW(TAG_WEB, "Skipping Supabase sync because session token or device hash is missing");
     }
 
     if (session != NULL && session->token[0] != '\0') {
         snprintf(dashboard_url_buf, sizeof(dashboard_url_buf),
-                 "https://spcs-v1.vercel.app/dashboard?token=%s", session->token);
+                 PWA_LINK_URL_FORMAT, session->token);
         dashboard_url = dashboard_url_buf;
     } else if (token[0] != '\0') {
         snprintf(dashboard_url_buf, sizeof(dashboard_url_buf),
-                 "https://spcs-v1.vercel.app/dashboard?token=%s", token);
+                 PWA_LINK_URL_FORMAT, token);
         dashboard_url = dashboard_url_buf;
     } else {
-        dashboard_url = "https://spcs-v1.vercel.app/dashboard";
+        dashboard_url = PWA_DASHBOARD_URL;
     }
 
     // Increased buffer size for the advanced responsive CSS

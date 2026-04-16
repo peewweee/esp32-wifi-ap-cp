@@ -162,15 +162,16 @@ void supabase_init(void)
              uses_legacy_jwt_key() ? "legacy Bearer JWT" : "apikey-only secret key");
 }
 
-esp_err_t supabase_create_session(const char *token, const char *mac_hash, int duration_sec)
+esp_err_t supabase_create_session(const char *session_token, const char *device_hash, int duration_sec)
 {
-    char body[512];
+    char body[640];
     char session_end[32];
     char heartbeat[32];
     time_t now;
     bool have_time;
 
-    if (token == NULL || token[0] == '\0' || mac_hash == NULL || mac_hash[0] == '\0') {
+    if (session_token == NULL || session_token[0] == '\0' ||
+        device_hash == NULL || device_hash[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -178,24 +179,24 @@ esp_err_t supabase_create_session(const char *token, const char *mac_hash, int d
     if (!have_time) {
         ESP_LOGW(TAG, "System clock is not set; using placeholder session_end");
         snprintf(body, sizeof(body),
-                 "{\"token\":\"%s\",\"mac_hash\":\"%s\",\"session_end\":\"2099-12-31T23:59:59Z\","
+                 "{\"session_token\":\"%s\",\"device_hash\":\"%s\",\"session_end\":\"2099-12-31T23:59:59Z\","
                  "\"remaining_seconds\":%d,\"status\":\"active\",\"ap_connected\":true}",
-                 token, mac_hash, duration_sec);
+                 session_token, device_hash, duration_sec);
     } else {
         format_timestamp_utc(now + duration_sec, session_end, sizeof(session_end));
         format_timestamp_utc(now, heartbeat, sizeof(heartbeat));
         snprintf(body, sizeof(body),
-                 "{\"token\":\"%s\",\"mac_hash\":\"%s\",\"session_end\":\"%s\",\"remaining_seconds\":%d,"
+                 "{\"session_token\":\"%s\",\"device_hash\":\"%s\",\"session_end\":\"%s\",\"remaining_seconds\":%d,"
                  "\"status\":\"active\",\"ap_connected\":true,\"last_heartbeat\":\"%s\"}",
-                 token, mac_hash, session_end, duration_sec, heartbeat);
+                 session_token, device_hash, session_end, duration_sec, heartbeat);
     }
 
     return perform_request(HTTP_METHOD_POST, "/rest/v1/sessions", body, true);
 }
 
-esp_err_t supabase_update_heartbeat(const char *token, int remaining_sec)
+esp_err_t supabase_update_heartbeat(const char *session_token, int remaining_sec)
 {
-    char path[160];
+    char path[224];
     char body[256];
     char heartbeat[32];
     time_t now;
@@ -203,11 +204,11 @@ esp_err_t supabase_update_heartbeat(const char *token, int remaining_sec)
     bool expired = remaining_sec <= 0;
     int safe_remaining = remaining_sec > 0 ? remaining_sec : 0;
 
-    if (token == NULL || token[0] == '\0') {
+    if (session_token == NULL || session_token[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
 
-    snprintf(path, sizeof(path), "/rest/v1/sessions?token=eq.%s", token);
+    snprintf(path, sizeof(path), "/rest/v1/sessions?session_token=eq.%s", session_token);
 
     have_time = get_valid_time(&now);
     if (have_time) {
@@ -229,15 +230,15 @@ esp_err_t supabase_update_heartbeat(const char *token, int remaining_sec)
     return perform_request(HTTP_METHOD_PATCH, path, body, false);
 }
 
-esp_err_t supabase_mark_disconnected(const char *token)
+esp_err_t supabase_mark_disconnected(const char *session_token)
 {
-    char path[160];
+    char path[224];
 
-    if (token == NULL || token[0] == '\0') {
+    if (session_token == NULL || session_token[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
 
-    snprintf(path, sizeof(path), "/rest/v1/sessions?token=eq.%s", token);
+    snprintf(path, sizeof(path), "/rest/v1/sessions?session_token=eq.%s", session_token);
     return perform_request(HTTP_METHOD_PATCH,
                            path,
                            "{\"ap_connected\":false,\"status\":\"disconnected\"}",

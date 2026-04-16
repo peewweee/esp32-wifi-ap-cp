@@ -31,4 +31,28 @@ endif()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(esp32_nat_router)
 
+# Work around Windows builds that sometimes lose the generated esp_system
+# linker-script search path and emit -L"", which breaks -T memory.ld.
+# Link libphy/librtc by full path as an additional safeguard for the same
+# Windows linker path-resolution issue.
+idf_build_get_property(PROJECT_EXECUTABLE EXECUTABLE)
+idf_build_get_property(IDF_TARGET IDF_TARGET)
+set(ESP_PHY_LIB_DIR "$ENV{IDF_PATH}/components/esp_phy/lib/${IDF_TARGET}")
+set(ESP_PHY_STAGE_DIR "${CMAKE_BINARY_DIR}/esp-idf/esp_phy/prebuilt")
+file(MAKE_DIRECTORY "${ESP_PHY_STAGE_DIR}")
+file(COPY
+    "${ESP_PHY_LIB_DIR}/libphy.a"
+    "${ESP_PHY_LIB_DIR}/librtc.a"
+    DESTINATION "${ESP_PHY_STAGE_DIR}"
+)
+target_link_options(${PROJECT_EXECUTABLE} PRIVATE
+    "-Lesp-idf/esp_system"
+    "-Lesp-idf/esp_system/ld"
+    "-Lesp-idf/esp_phy/prebuilt"
+)
+target_link_libraries(${PROJECT_EXECUTABLE} PRIVATE
+    "${ESP_PHY_LIB_DIR}/libphy.a"
+    "${ESP_PHY_LIB_DIR}/librtc.a"
+)
+
 spiffs_create_partition_image(storage spiffs_image FLASH_IN_PROJECT)

@@ -57,7 +57,6 @@ esp_err_t get_config_param_str(char* name, char** param);
 void print_portmap_tab();
 esp_err_t add_portmap(uint8_t proto, uint16_t mport, uint32_t daddr, uint16_t dport);
 esp_err_t del_portmap(uint8_t proto, uint16_t mport);
-void generate_token_from_mac(const uint8_t mac[6], char token_out[17]);
 void handle_client_disconnect(const uint8_t mac[6]);
 
 #ifdef __cplusplus
