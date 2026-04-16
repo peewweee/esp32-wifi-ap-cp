@@ -42,7 +42,7 @@ The current firmware combines:
 - A SoftAP that is always exposed to clients
 - An optional STA uplink to another Wi-Fi network
 - IPv4 NAPT and port mapping
-- A captive portal with short-lived client sessions
+- A captive portal with session-gated internet access
 - A serial CLI for configuration and diagnostics
 - SPIFFS-hosted image assets used by the portal UI
 
@@ -128,7 +128,7 @@ Important runtime facts:
 ## Networking Model
 
 SoftAP behavior:
-- Default AP SSID is `ESP32_NAT_Router`
+- Default AP SSID is `SOLAR CONNECT`
 - Default AP password is empty, so the default AP is open
 - Default AP IP is `192.168.4.1`
 - AP max clients is configured to 8 in the Wi-Fi config
@@ -158,17 +158,18 @@ The captive portal is implemented by the combination of:
 
 Per-client session model:
 - Sessions are tracked in RAM only
-- Session identity is the client IPv4 address obtained from the HTTP socket peer address
+- Session matching uses client IP and, when available, a stable MAC-derived identity
 - Maximum tracked clients is 20
-- Session duration is currently hard-coded to `60` seconds
-- Existing active sessions are not extended when `/confirm` is visited again
-- A MAC-derived token and hash are also generated to sync the session outward to Supabase and the dashboard
+- Daily quota is currently hard-coded to `3600` seconds
+- The firmware generates a per-session random `session_token`
+- The firmware also generates a stable `device_hash` intended for cross-session linkage
+- Supabase is expected to use `installation_id <-> device_hash` linkage so the PWA does not need a tokenized URL every new day
 
 Captive portal HTTP flow:
 - `/`
   Shows the portal landing page with terms and a checkbox gate
 - `/confirm`
-  Starts a session for the client IP, waits if upstream Wi-Fi is not ready, enables NAPT when uplink is ready, and shows the "connected" page
+  Grants access for the current session, enables NAPT when uplink is ready, and shows the connected page
 - `/api/status`
   Returns JSON describing whether the current client IP is authenticated and how many seconds remain
 
@@ -238,13 +239,22 @@ UI/asset sources:
 Branding and handoff:
 - The captive portal and connected page are branded as `SOLAR CONNECT`
 - The connected page links out to:
-  `https://spcs-v1.vercel.app?connected=true&seconds=<remaining>`
+  `https://spcs-v1.vercel.app/dashboard/link?session_token=<token>`
+
+PWA recovery design:
+- The generic dashboard route is expected to be:
+  `https://spcs-v1.vercel.app/dashboard`
+- If the generic dashboard cannot resolve a linked installation, it should instruct the user to connect to `SOLAR CONNECT`
+- The recommended manual recovery action is a link to:
+  `http://192.168.4.1/`
+- If that local page does not open, the user is probably not connected to `SOLAR CONNECT`
+- The firmware can expose the local portal again, but it cannot guarantee that the operating system will auto-open the captive portal popup on every reconnect
 
 How this maps to the thesis user flows:
 - `User Flow A: On-site network connectivity`
-  This is the main implemented path in the current repo. Users join the SoftAP, are intercepted by captive DNS/HTTP, accept terms on `/`, and are sent through `/confirm` into a timed session plus dashboard handoff.
+  This is the main implemented path in the current repo. Users join the SoftAP, are intercepted by captive DNS/HTTP, accept terms on `/`, and are sent through `/confirm` into a timed session plus one-time dashboard linking handoff.
 - `User Flow B: Remote/offline dashboard access`
-  This is only represented indirectly here. The firmware generates dashboard URLs and syncs session state to Supabase, but the actual context-aware remote dashboard behavior lives outside this repository.
+  This is only represented indirectly here. The firmware syncs session state to Supabase and generates a one-time linking URL, but the actual generic dashboard and automatic linked-installation experience live outside this repository.
 
 ## Persistent Configuration
 
@@ -287,7 +297,7 @@ Key semantics:
 
 Default behavior when keys are missing:
 - `ssid`, `passwd`, `ent_username`, `ent_identity`, `static_ip`, `subnet_mask`, `gateway_addr` default to empty strings
-- `ap_ssid` defaults to `ESP32_NAT_Router`
+- `ap_ssid` defaults to `SOLAR CONNECT`
 - `ap_passwd` defaults to empty string
 - `ap_ip` defaults to `192.168.4.1`
 - `lock` defaults to `"0"`
@@ -402,11 +412,11 @@ Security issues:
 - Sensitive config values are printed to the serial log and `show` output
 
 Session enforcement limitations:
-- Session duration in code is `60` seconds, while portal copy says `1 hour per day`
-- Session tracking is per client IP in RAM only
-- NAT is enabled globally and never disabled, so the access-control model is incomplete
-- `/confirm` starts the session timer before confirming uplink readiness, so time can be consumed while the ESP32 is still waiting for upstream Wi-Fi
-- The code does not currently enforce a true `1 hour per day per user/device` quota across reboots or days
+- Sessions are still stored in RAM only, so active-session recovery across ESP32 reboot is incomplete
+- NAT is enabled globally, so the access-control model is still not a strict per-client firewall
+- Long-term linkage depends on the firmware resolving a stable `device_hash`; if MAC lookup falls back to IP-derived hashing, the PWA/backend linkage becomes weaker
+- The firmware can expose the local portal at `192.168.4.1`, but it cannot guarantee that mobile and desktop operating systems will auto-open the captive portal popup on every reconnect
+- The complete one-time-bind dashboard experience depends on the external PWA implementing the contract in `PWA_LINKING_CONTRACT.md`
 
 Admin/config limitations:
 - The config page displays Enterprise and static IP fields, but the handler does not persist them from web submissions

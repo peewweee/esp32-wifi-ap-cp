@@ -199,9 +199,11 @@ Main functions:
 
 Current design characteristics:
 - sessions are stored in RAM
-- clients are primarily tracked by IP address
-- MAC-derived tokens are used for dashboard and backend sync
-- session duration is currently hard-coded in firmware
+- clients are matched through IP plus stable device identity where available
+- the firmware generates a per-session random `session_token`
+- the firmware generates a stable `device_hash` for cross-session linkage
+- daily quota is currently hard-coded to `3600` seconds
+- long-term PWA identity is expected to come from `installation_id`, not a permanent session token
 
 Implementation:
 - [main/http_server.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\http_server.c)
@@ -275,7 +277,9 @@ This is the primary implemented user flow.
 6. The firmware starts or resumes a session
 7. If uplink is available, NAT access is enabled
 8. The connected page is shown
-9. The user may open the external dashboard link
+9. The connected page exposes the one-time PWA link:
+   `https://spcs-v1.vercel.app/dashboard/link?session_token=<token>`
+10. The PWA binds the browser installation to the ESP32 device identity
 
 ### 6.3 User Flow B: Remote or Off-Station Dashboard Access
 
@@ -283,8 +287,10 @@ This is part of the intended full system but not fully implemented in this repos
 
 1. The user accesses the PWA from mobile data or another Wi-Fi network
 2. The dashboard loads from Vercel
-3. Session-related status is inferred from remote/backend state
-4. Local-only station access state is not fully available unless the user entered through the station network
+3. The PWA reads a persistent `installation_id`
+4. The PWA asks Supabase to resolve the latest relevant session for that linked installation
+5. If a linked session exists, the user's countdown/status is shown without needing the token in the URL again
+6. If no linked session exists, the PWA shows instructions and a manual recovery link to `http://192.168.4.1/`
 
 ## 7. Data and Control Flow
 
@@ -316,10 +322,11 @@ sequenceDiagram
     participant SB as Supabase
     participant PWA as Vercel PWA
 
-    ESP->>SB: Create session record
-    ESP->>SB: Send heartbeat updates
+    ESP->>SB: Upsert session by session_token
+    ESP->>SB: Send heartbeat updates with remaining time
     ESP->>SB: Mark disconnect or expiration
-    PWA->>SB: Read session-related state
+    PWA->>SB: Claim installation link using session_token
+    PWA->>SB: Resolve installation to latest session state
 ```
 
 ## 8. Software Component Map
@@ -405,11 +412,12 @@ The current code enforces access through:
 ### 10.3 Current Security Limitations
 
 Known limitations in the present implementation:
-- session duration in code is `60 seconds`, not `1 hour per day`
-- session tracking is not yet a durable daily quota system
+- active sessions are RAM-only, so recovery across ESP32 reboot is incomplete
 - admin credentials are hard-coded
 - NAT enablement is global rather than strict per-client isolation
 - sensitive configuration data is exposed in logs and CLI output
+- the firmware cannot guarantee that operating systems will auto-open the captive portal popup on every reconnect
+- the full one-time-link and generic-dashboard experience depends on the external PWA implementing the documented `installation_id <-> device_hash` flow
 
 ## 11. Implemented Features vs Planned Thesis Features
 
@@ -433,7 +441,7 @@ Known limitations in the present implementation:
 - eco-achievement and CO2 savings calculations
 - campus announcements module in the PWA
 - complete context-aware remote dashboard experience
-- full daily quota enforcement policy
+- robust reboot recovery for active sessions
 
 ## 12. Recommended Architectural Boundary
 
@@ -461,6 +469,9 @@ Best suited for:
 - announcement content
 - eco-impact visualization
 - remote availability and analytics
+- `installation_id` creation and persistence
+- one-time link claiming through `session_token`
+- generic dashboard resolution through linked `device_hash`
 
 ### 12.3 Hardware and Energy Layer
 
@@ -478,3 +489,9 @@ Best suited for:
 The current codebase already provides a strong architecture for the `connectivity and access-control` portion of the Smart Solar Hub. Its strongest implemented area is the local captive portal and managed Wi-Fi flow.
 
 However, the complete thesis system is larger than the current firmware. The architecture should therefore be understood as a multi-layer platform in which this repository is the embedded networking core, while the charging, sensing, and richer dashboard features remain either future integration work or external system components.
+
+For the current PWA-linking direction, the most important architectural rule is:
+- the first successful redirect link is the one-time bind
+- later visits should resolve by `installation_id` and `device_hash`
+- the local `http://192.168.4.1/` page is the manual recovery path when the user missed the first redirect link
+- captive popup behavior should not be treated as a guaranteed re-entry mechanism

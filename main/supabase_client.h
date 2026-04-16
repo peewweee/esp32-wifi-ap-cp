@@ -8,8 +8,8 @@ extern "C" {
 
 void supabase_init(void);
 esp_err_t supabase_create_session(const char *session_token, const char *device_hash, int duration_sec);
-esp_err_t supabase_update_heartbeat(const char *session_token, int remaining_sec);
-esp_err_t supabase_mark_disconnected(const char *session_token);
+esp_err_t supabase_update_heartbeat(const char *session_token, const char *device_hash, int remaining_sec);
+esp_err_t supabase_mark_disconnected(const char *session_token, const char *device_hash, int remaining_sec);
 
 #ifdef __cplusplus
 }

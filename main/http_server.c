@@ -75,6 +75,7 @@ typedef struct {
     uint32_t granted_seconds;
     uint32_t accounted_seconds;
     uint32_t day_id;
+    bool admitted;          // Has the user confirmed this Wi-Fi association?
     bool active;            // Is this slot in use?
 } client_session_t;
 
@@ -118,6 +119,11 @@ static int get_quota_remaining_for_mac(const uint8_t mac[6], uint32_t *day_id_ou
 static void checkpoint_session_usage(client_session_t *session, int64_t now, bool force_flush);
 static esp_err_t send_quota_page(httpd_req_t *req);
 static void load_quota_state(void);
+static int get_session_remaining_seconds(const client_session_t *session, int64_t now);
+static client_session_t *find_active_session_by_ip_or_mac(uint32_t ip, const uint8_t *mac);
+static void build_dashboard_url_for_session(const client_session_t *session,
+                                            char *out,
+                                            size_t out_len);
 
 esp_timer_handle_t restart_timer;
 
@@ -439,7 +445,9 @@ static void refresh_portal_auth_state(const char *reason)
             continue;
         }
 
-        has_active_session = true;
+        if (sessions[i].admitted) {
+            has_active_session = true;
+        }
     }
 
     if (s_global_session_end_time > 0 && s_global_session_end_time <= now) {
@@ -462,7 +470,7 @@ static bool has_active_access(void)
     }
 
     for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (sessions[i].active && sessions[i].end_time > now) {
+        if (sessions[i].active && sessions[i].admitted && sessions[i].end_time > now) {
             return true;
         }
     }
@@ -640,6 +648,8 @@ static client_session_t *start_or_resume_session(uint32_t ip,
 
     if (session_index >= 0) {
         if (sessions[session_index].end_time > now) {
+            sessions[session_index].ip_addr = ip;
+            sessions[session_index].admitted = true;
             if (mac != NULL) {
                 memcpy(sessions[session_index].mac, mac, 6);
             }
@@ -683,6 +693,7 @@ static client_session_t *start_or_resume_session(uint32_t ip,
         sessions[session_index].accounted_seconds = 0;
         sessions[session_index].day_id = get_current_day_id(NULL);
         sessions[session_index].end_time = now + ((int64_t)session_duration_sec * 1000000LL);
+        sessions[session_index].admitted = true;
         sessions[session_index].active = true;
         if (ip != 0) {
             s_global_session_end_time = 0;
@@ -707,6 +718,7 @@ static client_session_t *start_or_resume_session(uint32_t ip,
     sessions[session_index].accounted_seconds = 0;
     sessions[session_index].day_id = get_current_day_id(NULL);
     sessions[session_index].end_time = now + ((int64_t)session_duration_sec * 1000000LL);
+    sessions[session_index].admitted = true;
     sessions[session_index].active = true;
     if (mac != NULL) {
         memcpy(sessions[session_index].mac, mac, 6);
@@ -751,10 +763,16 @@ static esp_err_t ensure_napt_enabled(void)
 static void revoke_session(int session_index, bool disconnected, const char *reason)
 {
     char token[SESSION_TOKEN_LEN] = {0};
+    char device_hash[DEVICE_HASH_LEN] = {0};
     int64_t now = esp_timer_get_time();
+    int remaining_seconds = 0;
 
     if (session_index < 0 || session_index >= MAX_CLIENTS || !sessions[session_index].active) {
         return;
+    }
+
+    if (sessions[session_index].end_time > now) {
+        remaining_seconds = (int)((sessions[session_index].end_time - now) / 1000000LL);
     }
 
     checkpoint_session_usage(&sessions[session_index], now, true);
@@ -762,27 +780,85 @@ static void revoke_session(int session_index, bool disconnected, const char *rea
     if (sessions[session_index].token[0] != '\0') {
         strlcpy(token, sessions[session_index].token, sizeof(token));
     }
+    if (sessions[session_index].device_hash[0] != '\0') {
+        strlcpy(device_hash, sessions[session_index].device_hash, sizeof(device_hash));
+    }
 
+    sessions[session_index].admitted = false;
     sessions[session_index].active = false;
     refresh_portal_auth_state(reason);
 
-    if (token[0] == '\0') {
+    if (token[0] == '\0' || device_hash[0] == '\0') {
         return;
     }
 
     if (disconnected) {
-        esp_err_t err = supabase_mark_disconnected(token);
+        esp_err_t err = supabase_mark_disconnected(token, device_hash, remaining_seconds);
         if (err != ESP_OK) {
             ESP_LOGW(TAG_WEB, "Failed to mark session disconnected in Supabase: %s",
                      esp_err_to_name(err));
         }
     } else {
-        esp_err_t err = supabase_update_heartbeat(token, 0);
+        esp_err_t err = supabase_update_heartbeat(token, device_hash, 0);
         if (err != ESP_OK) {
             ESP_LOGW(TAG_WEB, "Failed to mark session expired in Supabase: %s",
                      esp_err_to_name(err));
         }
     }
+}
+
+static int get_session_remaining_seconds(const client_session_t *session, int64_t now)
+{
+    int64_t remaining;
+
+    if (session == NULL || !session->active) {
+        return -1;
+    }
+
+    remaining = session->end_time - now;
+    if (remaining <= 0) {
+        return -1;
+    }
+
+    return (int)(remaining / 1000000LL);
+}
+
+static client_session_t *find_active_session_by_ip_or_mac(uint32_t ip, const uint8_t *mac)
+{
+    int session_index = -1;
+    int64_t now = esp_timer_get_time();
+
+    if (mac != NULL && !mac_is_zero(mac)) {
+        session_index = find_session_index_by_mac(mac);
+    }
+    if (session_index < 0 && ip != 0) {
+        session_index = find_session_index_by_ip(ip);
+    }
+    if (session_index < 0) {
+        return NULL;
+    }
+
+    if (!sessions[session_index].active || sessions[session_index].end_time <= now) {
+        return NULL;
+    }
+
+    return &sessions[session_index];
+}
+
+static void build_dashboard_url_for_session(const client_session_t *session,
+                                            char *out,
+                                            size_t out_len)
+{
+    if (out == NULL || out_len == 0) {
+        return;
+    }
+
+    if (session != NULL && session->token[0] != '\0') {
+        snprintf(out, out_len, PWA_LINK_URL_FORMAT, session->token);
+        return;
+    }
+
+    strlcpy(out, PWA_DASHBOARD_URL, out_len);
 }
 
 static int get_global_remaining_seconds(void)
@@ -816,7 +892,7 @@ int get_remaining_seconds(uint32_t ip) {
 
     if (ip != 0) {
         for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (sessions[i].active && sessions[i].ip_addr == ip) {
+            if (sessions[i].active && sessions[i].admitted && sessions[i].ip_addr == ip) {
                 int64_t remaining = sessions[i].end_time - now;
                 if (remaining <= 0) {
                     revoke_session(i, false, "session_expired");
@@ -828,7 +904,7 @@ int get_remaining_seconds(uint32_t ip) {
 
         if (get_client_mac_for_ip(ip, client_mac)) {
             int session_index = find_session_index_by_mac(client_mac);
-            if (session_index >= 0) {
+            if (session_index >= 0 && sessions[session_index].admitted) {
                 int64_t remaining = sessions[session_index].end_time - now;
                 if (remaining <= 0) {
                     revoke_session(session_index, false, "session_expired_by_mac");
@@ -881,15 +957,28 @@ static void supabase_heartbeat_task(void *pvParameters)
 
         for (int i = 0; i < MAX_CLIENTS; i++) {
             int remaining;
+            int64_t now = esp_timer_get_time();
 
-            if (!sessions[i].active || sessions[i].token[0] == '\0') {
+            if (!sessions[i].active ||
+                sessions[i].token[0] == '\0' ||
+                sessions[i].device_hash[0] == '\0') {
                 continue;
             }
 
-            checkpoint_session_usage(&sessions[i], esp_timer_get_time(), false);
-            remaining = get_remaining_seconds(sessions[i].ip_addr);
+            checkpoint_session_usage(&sessions[i], now, false);
+            remaining = get_session_remaining_seconds(&sessions[i], now);
             if (remaining > 0) {
-                esp_err_t err = supabase_update_heartbeat(sessions[i].token, remaining);
+                esp_err_t err;
+
+                if (sessions[i].admitted) {
+                    err = supabase_update_heartbeat(sessions[i].token,
+                                                    sessions[i].device_hash,
+                                                    remaining);
+                } else {
+                    err = supabase_mark_disconnected(sessions[i].token,
+                                                     sessions[i].device_hash,
+                                                     remaining);
+                }
                 if (err != ESP_OK) {
                     ESP_LOGW(TAG_WEB, "Heartbeat failed for a session: %s",
                              esp_err_to_name(err));
@@ -898,7 +987,7 @@ static void supabase_heartbeat_task(void *pvParameters)
             }
 
             ESP_LOGI(TAG_WEB, "Session expired");
-            revoke_session(i, false, "session_expired_heartbeat");
+            revoke_session(i, !sessions[i].admitted, "session_expired_heartbeat");
         }
     }
 }
@@ -1204,19 +1293,60 @@ static esp_err_t admin_config_post_handler(httpd_req_t *req)
  */
 static esp_err_t portal_handler(httpd_req_t *req)
 {
-    // Check if user is already authenticated
     uint32_t ip = get_client_ip(req);
     int remaining = get_remaining_seconds(ip);
+    uint8_t client_mac[6] = {0};
+    client_session_t *session = NULL;
+    char dashboard_url[192];
 
-    if (remaining > 0) {
-        // Already logged in? Go to confirm page directly
-        httpd_resp_set_status(req, "302 Found");
-        httpd_resp_set_hdr(req, "Location", "/confirm");
-        httpd_resp_send(req, NULL, 0);
+    if (get_client_mac_for_ip(ip, client_mac)) {
+        session = find_active_session_by_ip_or_mac(ip, client_mac);
+    } else {
+        session = find_active_session_by_ip_or_mac(ip, NULL);
+    }
+
+    if (session != NULL) {
+        build_dashboard_url_for_session(session, dashboard_url, sizeof(dashboard_url));
+
+        char *resp_str = malloc(8192);
+        if (resp_str == NULL) {
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
+
+        snprintf(resp_str, 8192,
+            "<!DOCTYPE html><html><head><title>Solar Connect Portal</title>"
+            "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
+            "<style>"
+            "body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; "
+            "background: #F5F0EB; color: #521B1B; display: flex; align-items: center; justify-content: center; "
+            "min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }"
+            ".card { width: 100%%; max-width: 460px; background: #fff; border-radius: 24px; padding: 32px; "
+            "box-shadow: 0 10px 40px rgba(82, 27, 27, 0.1); }"
+            "h1 { font-size: 28px; margin: 0 0 10px; }"
+            "p { line-height: 1.6; color: #6D3B39; margin: 0 0 16px; }"
+            ".pill { display: inline-block; margin: 0 0 18px; padding: 8px 14px; border-radius: 999px; "
+            "background: #E9F4ED; color: #1D734B; font-size: 13px; font-weight: 700; }"
+            ".btn { display: block; width: 100%%; padding: 14px 0; font-size: 16px; font-weight: 700; "
+            "color: #fff; background-color: #1D734B; border: none; border-radius: 12px; text-decoration: none; "
+            "text-align: center; margin-top: 10px; box-sizing: border-box; }"
+            ".btn.secondary { background-color: #1A1A1A; }"
+            "</style></head><body><div class='card'>"
+            "<h1>Welcome back to SOLAR CONNECT</h1>"
+            "<div class='pill'>%d minute%s remaining today</div>"
+            "<p>Your device still has an active session. You can continue browsing, or open the dashboard link now if you skipped it earlier.</p>"
+            "<a href='%s' target='_blank' class='btn'>Open Solar Connect App</a>"
+            "<a href='/confirm' class='btn secondary'>Resume Internet Access</a>"
+            "</div></body></html>",
+            (remaining + 59) / 60,
+            ((remaining + 59) / 60) == 1 ? "" : "s",
+            dashboard_url);
+
+        httpd_resp_send(req, resp_str, strlen(resp_str));
+        free(resp_str);
         return ESP_OK;
     }
-    
-    // Serve the Login HTML
+
     const char* resp_str = 
         "<html><head><title>CPE Wi-Fi</title>"
         "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
@@ -1404,17 +1534,6 @@ static esp_err_t confirm_handler(httpd_req_t *req)
     net_diag_log_snapshot("confirm_handler");
 
     have_mac = get_client_mac_for_ip(ip, client_mac);
-    generate_session_token(token);
-
-    if (have_mac) {
-        generate_hash_from_mac(client_mac, device_hash);
-    } else if (ip != 0) {
-        ip4_addr_t ip_addr = { .addr = ip };
-        generate_hash_from_ip(ip, device_hash);
-        ESP_LOGW(TAG_WEB, "Falling back to IP-derived device hash for client " IPSTR, IP2STR(&ip_addr));
-    } else {
-        ESP_LOGW(TAG_WEB, "Unable to derive device hash for /confirm; dashboard link will omit token");
-    }
 
     if (have_mac) {
         granted_seconds = get_quota_remaining_for_mac(client_mac, NULL);
@@ -1430,13 +1549,6 @@ static esp_err_t confirm_handler(httpd_req_t *req)
             }
         }
     }
-
-    // --- START THE INTERNET HERE ---
-    session = start_or_resume_session(ip,
-                                      have_mac ? client_mac : NULL,
-                                      token[0] != '\0' ? token : NULL,
-                                      device_hash[0] != '\0' ? device_hash : NULL,
-                                      granted_seconds);
 
     if (!ap_connect) {
         const char *waiting_html =
@@ -1488,6 +1600,25 @@ static esp_err_t confirm_handler(httpd_req_t *req)
     // and forward authenticated ones upstream.
     // -------------------------------
 
+    generate_session_token(token);
+
+    if (have_mac) {
+        generate_hash_from_mac(client_mac, device_hash);
+    } else if (ip != 0) {
+        ip4_addr_t ip_addr = { .addr = ip };
+        generate_hash_from_ip(ip, device_hash);
+        ESP_LOGW(TAG_WEB, "Falling back to IP-derived device hash for client " IPSTR, IP2STR(&ip_addr));
+    } else {
+        ESP_LOGW(TAG_WEB, "Unable to derive device hash for /confirm; dashboard link will omit token");
+    }
+
+    // Only start counting once internet access is actually available.
+    session = start_or_resume_session(ip,
+                                      have_mac ? client_mac : NULL,
+                                      token[0] != '\0' ? token : NULL,
+                                      device_hash[0] != '\0' ? device_hash : NULL,
+                                      granted_seconds);
+
     int remaining_seconds = get_remaining_seconds(ip);
     if (remaining_seconds < 0) remaining_seconds = 0;
     snprintf(remaining_label, sizeof(remaining_label),
@@ -1503,10 +1634,6 @@ static esp_err_t confirm_handler(httpd_req_t *req)
         esp_err_t sync_err = supabase_create_session(session_token,
                                                      session_device_hash,
                                                      remaining_seconds > 0 ? remaining_seconds : granted_seconds);
-        if (sync_err == ESP_ERR_INVALID_STATE) {
-            sync_err = supabase_update_heartbeat(session_token, remaining_seconds);
-        }
-
         if (sync_err != ESP_OK) {
             ESP_LOGW(TAG_WEB, "Failed to sync session to Supabase: %s",
                      esp_err_to_name(sync_err));

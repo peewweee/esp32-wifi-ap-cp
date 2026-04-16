@@ -493,11 +493,12 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
         }
     };
 
-    strlcpy((char*)ap_config.sta.ssid, ap_ssid, sizeof(ap_config.sta.ssid));
+    strlcpy((char*)ap_config.ap.ssid, ap_ssid, sizeof(ap_config.ap.ssid));
+    ap_config.ap.ssid_len = strlen(ap_ssid);
     if (strlen(ap_passwd) < 8) {
         ap_config.ap.authmode = WIFI_AUTH_OPEN;
     } else {
-	    strlcpy((char*)ap_config.sta.password, ap_passwd, sizeof(ap_config.sta.password));
+	    strlcpy((char*)ap_config.ap.password, ap_passwd, sizeof(ap_config.ap.password));
     }
 
     if (strlen(ssid) > 0) {
@@ -621,7 +622,7 @@ void app_main(void)
     get_config_param_blob("ap_mac", &ap_mac, 6);
     get_config_param_str("ap_ssid", &ap_ssid);
     if (ap_ssid == NULL) {
-        ap_ssid = param_set_default("ESP32_NAT_Router");
+        ap_ssid = param_set_default("SOLAR CONNECT");
     }   
     get_config_param_str("ap_passwd", &ap_passwd);
     if (ap_passwd == NULL) {

@@ -64,10 +64,22 @@ static bool get_valid_time(time_t *out_now)
     return true;
 }
 
+static const char *http_method_name(esp_http_client_method_t method)
+{
+    switch (method) {
+        case HTTP_METHOD_POST:
+            return "POST";
+        case HTTP_METHOD_PATCH:
+            return "PATCH";
+        default:
+            return "HTTP";
+    }
+}
+
 static esp_err_t perform_request(esp_http_client_method_t method,
                                  const char *path,
                                  const char *body,
-                                 bool return_representation)
+                                 const char *prefer_header)
 {
     char url[256];
     char auth_header[160];
@@ -106,8 +118,8 @@ static esp_err_t perform_request(esp_http_client_method_t method,
     }
     esp_http_client_set_header(client, "Content-Type", "application/json");
     esp_http_client_set_header(client, "Accept", "application/json");
-    if (return_representation) {
-        esp_http_client_set_header(client, "Prefer", "return=representation");
+    if (prefer_header != NULL && prefer_header[0] != '\0') {
+        esp_http_client_set_header(client, "Prefer", prefer_header);
     }
 
     if (body != NULL) {
@@ -129,17 +141,13 @@ static esp_err_t perform_request(esp_http_client_method_t method,
     response_buf[response_len] = '\0';
 
     ESP_LOGI(TAG, "%s %s -> HTTP %d",
-             method == HTTP_METHOD_POST ? "POST" : "PATCH",
+             http_method_name(method),
              path,
              status_code);
     esp_http_client_cleanup(client);
 
     if (status_code >= 200 && status_code < 300) {
         return ESP_OK;
-    }
-
-    if (status_code == 409) {
-        return ESP_ERR_INVALID_STATE;
     }
 
     return ESP_FAIL;
@@ -162,85 +170,78 @@ void supabase_init(void)
              uses_legacy_jwt_key() ? "legacy Bearer JWT" : "apikey-only secret key");
 }
 
-esp_err_t supabase_create_session(const char *session_token, const char *device_hash, int duration_sec)
+static esp_err_t supabase_upsert_session(const char *session_token,
+                                         const char *device_hash,
+                                         int remaining_sec,
+                                         bool ap_connected,
+                                         const char *status)
 {
-    char body[640];
+    char body[768];
     char session_end[32];
     char heartbeat[32];
+    int safe_remaining = remaining_sec > 0 ? remaining_sec : 0;
     time_t now;
     bool have_time;
 
     if (session_token == NULL || session_token[0] == '\0' ||
-        device_hash == NULL || device_hash[0] == '\0') {
+        device_hash == NULL || device_hash[0] == '\0' ||
+        status == NULL || status[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
-
-    have_time = get_valid_time(&now);
-    if (!have_time) {
-        ESP_LOGW(TAG, "System clock is not set; using placeholder session_end");
-        snprintf(body, sizeof(body),
-                 "{\"session_token\":\"%s\",\"device_hash\":\"%s\",\"session_end\":\"2099-12-31T23:59:59Z\","
-                 "\"remaining_seconds\":%d,\"status\":\"active\",\"ap_connected\":true}",
-                 session_token, device_hash, duration_sec);
-    } else {
-        format_timestamp_utc(now + duration_sec, session_end, sizeof(session_end));
-        format_timestamp_utc(now, heartbeat, sizeof(heartbeat));
-        snprintf(body, sizeof(body),
-                 "{\"session_token\":\"%s\",\"device_hash\":\"%s\",\"session_end\":\"%s\",\"remaining_seconds\":%d,"
-                 "\"status\":\"active\",\"ap_connected\":true,\"last_heartbeat\":\"%s\"}",
-                 session_token, device_hash, session_end, duration_sec, heartbeat);
-    }
-
-    return perform_request(HTTP_METHOD_POST, "/rest/v1/sessions", body, true);
-}
-
-esp_err_t supabase_update_heartbeat(const char *session_token, int remaining_sec)
-{
-    char path[224];
-    char body[256];
-    char heartbeat[32];
-    time_t now;
-    bool have_time;
-    bool expired = remaining_sec <= 0;
-    int safe_remaining = remaining_sec > 0 ? remaining_sec : 0;
-
-    if (session_token == NULL || session_token[0] == '\0') {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    snprintf(path, sizeof(path), "/rest/v1/sessions?session_token=eq.%s", session_token);
 
     have_time = get_valid_time(&now);
     if (have_time) {
+        time_t end_time = now;
+        if (safe_remaining > 0) {
+            end_time += safe_remaining;
+        }
+
+        format_timestamp_utc(end_time, session_end, sizeof(session_end));
         format_timestamp_utc(now, heartbeat, sizeof(heartbeat));
         snprintf(body, sizeof(body),
-                 expired
-                     ? "{\"remaining_seconds\":%d,\"last_heartbeat\":\"%s\",\"status\":\"expired\",\"ap_connected\":true}"
-                     : "{\"remaining_seconds\":%d,\"last_heartbeat\":\"%s\",\"ap_connected\":true}",
-                 safe_remaining, heartbeat);
+                 "{\"session_token\":\"%s\",\"device_hash\":\"%s\",\"session_end\":\"%s\","
+                 "\"remaining_seconds\":%d,\"status\":\"%s\",\"ap_connected\":%s,"
+                 "\"last_heartbeat\":\"%s\"}",
+                 session_token,
+                 device_hash,
+                 session_end,
+                 safe_remaining,
+                 status,
+                 ap_connected ? "true" : "false",
+                 heartbeat);
     } else {
-        ESP_LOGW(TAG, "System clock is not set; heartbeat will omit last_heartbeat");
+        ESP_LOGW(TAG, "System clock is not set; session upsert will omit timestamps");
         snprintf(body, sizeof(body),
-                 expired
-                     ? "{\"remaining_seconds\":%d,\"status\":\"expired\",\"ap_connected\":true}"
-                     : "{\"remaining_seconds\":%d,\"ap_connected\":true}",
-                 safe_remaining);
+                 "{\"session_token\":\"%s\",\"device_hash\":\"%s\",\"remaining_seconds\":%d,"
+                 "\"status\":\"%s\",\"ap_connected\":%s}",
+                 session_token,
+                 device_hash,
+                 safe_remaining,
+                 status,
+                 ap_connected ? "true" : "false");
     }
 
-    return perform_request(HTTP_METHOD_PATCH, path, body, false);
+    return perform_request(HTTP_METHOD_POST,
+                           "/rest/v1/sessions?on_conflict=session_token",
+                           body,
+                           "resolution=merge-duplicates,return=representation");
 }
 
-esp_err_t supabase_mark_disconnected(const char *session_token)
+esp_err_t supabase_create_session(const char *session_token, const char *device_hash, int duration_sec)
 {
-    char path[224];
+    return supabase_upsert_session(session_token, device_hash, duration_sec, true, "active");
+}
 
-    if (session_token == NULL || session_token[0] == '\0') {
-        return ESP_ERR_INVALID_ARG;
-    }
+esp_err_t supabase_update_heartbeat(const char *session_token, const char *device_hash, int remaining_sec)
+{
+    return supabase_upsert_session(session_token,
+                                   device_hash,
+                                   remaining_sec,
+                                   true,
+                                   remaining_sec > 0 ? "active" : "expired");
+}
 
-    snprintf(path, sizeof(path), "/rest/v1/sessions?session_token=eq.%s", session_token);
-    return perform_request(HTTP_METHOD_PATCH,
-                           path,
-                           "{\"ap_connected\":false,\"status\":\"disconnected\"}",
-                           false);
+esp_err_t supabase_mark_disconnected(const char *session_token, const char *device_hash, int remaining_sec)
+{
+    return supabase_upsert_session(session_token, device_hash, remaining_sec, false, "disconnected");
 }
