@@ -30,6 +30,7 @@
 #include "net_diag.h"
 #include "supabase_client.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "esp_timer.h"
 #include "nvs.h"
@@ -91,9 +92,24 @@ static quota_record_t s_quota_records[MAX_CLIENTS];
 static bool s_napt_enabled;
 static int64_t s_global_session_end_time;
 static bool s_heartbeat_task_started;
+static bool s_supabase_update_task_started;
 static bool s_quota_dirty;
 static uint32_t s_day_hint;
 static int64_t s_last_quota_flush_us;
+static QueueHandle_t s_supabase_update_queue;
+
+typedef struct {
+    char token[SESSION_TOKEN_LEN];
+    char device_hash[DEVICE_HASH_LEN];
+    int remaining_seconds;
+    int mode;
+} pending_supabase_update_t;
+
+typedef enum {
+    SUPABASE_UPDATE_ACTIVE = 0,
+    SUPABASE_UPDATE_DISCONNECTED = 1,
+    SUPABASE_UPDATE_EXPIRED = 2
+} supabase_update_mode_t;
 
 // --- FORWARD DECLARATIONS ---
 int get_remaining_seconds(uint32_t ip);
@@ -112,6 +128,16 @@ static void generate_hash_from_mac(const uint8_t mac[6], char device_hash_out[DE
 static void generate_hash_from_ip(uint32_t ip, char device_hash_out[DEVICE_HASH_LEN]);
 static void ensure_heartbeat_task_started(void);
 static void supabase_heartbeat_task(void *pvParameters);
+static void ensure_supabase_update_task_started(void);
+static void supabase_update_task(void *pvParameters);
+static esp_err_t perform_supabase_session_update(const char *token,
+                                                 const char *device_hash,
+                                                 int remaining_seconds,
+                                                 supabase_update_mode_t mode);
+static void queue_supabase_session_update(const char *token,
+                                          const char *device_hash,
+                                          int remaining_seconds,
+                                          supabase_update_mode_t mode);
 static void refresh_portal_auth_state(const char *reason);
 static void maybe_disable_napt_if_idle(const char *reason);
 static void revoke_session(int session_index, bool disconnected, const char *reason);
@@ -799,22 +825,20 @@ static void revoke_session(int session_index, bool disconnected, const char *rea
     refresh_portal_auth_state(reason);
 
     if (token[0] == '\0' || device_hash[0] == '\0') {
+        ESP_LOGW(TAG_WEB, "Skipping Supabase session update because token/device_hash is missing during revoke");
         return;
     }
 
     if (disconnected) {
-        esp_err_t err = supabase_mark_disconnected(token, device_hash, remaining_seconds);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG_WEB, "Failed to mark session disconnected in Supabase: %s",
-                     esp_err_to_name(err));
-        }
+        ESP_LOGI(TAG_WEB, "Marking session disconnected in Supabase with %d seconds remaining", remaining_seconds);
     } else {
-        esp_err_t err = supabase_update_heartbeat(token, device_hash, 0);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG_WEB, "Failed to mark session expired in Supabase: %s",
-                     esp_err_to_name(err));
-        }
+        ESP_LOGI(TAG_WEB, "Marking session expired in Supabase");
     }
+
+    queue_supabase_session_update(token,
+                                  device_hash,
+                                  remaining_seconds,
+                                  disconnected ? SUPABASE_UPDATE_DISCONNECTED : SUPABASE_UPDATE_EXPIRED);
 }
 
 static int get_session_remaining_seconds(const client_session_t *session, int64_t now)
@@ -939,23 +963,96 @@ void start_session(uint32_t ip) {
     start_or_resume_session(ip, NULL, NULL, NULL, SESSION_DURATION_SEC);
 }
 
+void handle_client_connect(const uint8_t mac[6])
+{
+    char token[SESSION_TOKEN_LEN] = {0};
+    char device_hash[DEVICE_HASH_LEN] = {0};
+    client_session_t *session;
+    int remaining_seconds;
+
+    if (mac == NULL || mac_is_zero(mac)) {
+        return;
+    }
+
+    if (!ap_connect) {
+        ESP_LOGI(TAG_WEB, "AP client connected but uplink is not ready; waiting for captive flow");
+        return;
+    }
+
+    remaining_seconds = get_quota_remaining_for_mac(mac, NULL);
+    if (remaining_seconds <= 0) {
+        ESP_LOGI(TAG_WEB, "AP client connected with no remaining quota; waiting for captive flow");
+        return;
+    }
+
+    if (remaining_seconds >= DAILY_QUOTA_SEC) {
+        ESP_LOGI(TAG_WEB, "AP client connected with a fresh daily quota; requiring captive flow");
+        return;
+    }
+
+    if (ensure_napt_enabled() != ESP_OK) {
+        ESP_LOGW(TAG_WEB, "Failed to auto-resume internet access on reconnect because NAPT is unavailable");
+        return;
+    }
+
+    generate_session_token(token);
+    generate_hash_from_mac(mac, device_hash);
+
+    session = start_or_resume_session(0, mac, token, device_hash, remaining_seconds);
+    if (session == NULL || session->token[0] == '\0' || session->device_hash[0] == '\0') {
+        ESP_LOGW(TAG_WEB, "Failed to auto-resume session on reconnect");
+        return;
+    }
+
+    ESP_LOGI(TAG_WEB, "Auto-resumed same-day internet access on reconnect with %d seconds remaining",
+             remaining_seconds);
+    queue_supabase_session_update(session->token,
+                                  session->device_hash,
+                                  remaining_seconds,
+                                  SUPABASE_UPDATE_ACTIVE);
+}
+
 void handle_client_disconnect(const uint8_t mac[6])
 {
+    bool matched = false;
+    int active_session_count = 0;
+    int fallback_session_index = -1;
+
     if (mac == NULL) {
         return;
     }
 
-    ESP_LOGI(TAG_WEB, "Handling AP disconnect for client session");
+    ESP_LOGI(TAG_WEB,
+             "Handling AP disconnect for client session %02x:%02x:%02x:%02x:%02x:%02x",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (!sessions[i].active) {
             continue;
         }
 
+        active_session_count++;
+        if (fallback_session_index < 0) {
+            fallback_session_index = i;
+        }
+
         if (memcmp(sessions[i].mac, mac, 6) == 0) {
+            matched = true;
             revoke_session(i, true, "ap_client_disconnected");
         }
     }
+
+    if (matched) {
+        return;
+    }
+
+    if (connect_count == 0 && active_session_count == 1 && fallback_session_index >= 0) {
+        ESP_LOGW(TAG_WEB, "AP disconnect MAC did not match stored session MAC; revoking the only active session as fallback");
+        revoke_session(fallback_session_index, true, "ap_client_disconnected_fallback");
+        return;
+    }
+
+    ESP_LOGW(TAG_WEB, "AP disconnect did not match any active session; no Supabase disconnect update sent");
 }
 
 static void supabase_heartbeat_task(void *pvParameters)
@@ -999,6 +1096,98 @@ static void supabase_heartbeat_task(void *pvParameters)
             ESP_LOGI(TAG_WEB, "Session expired");
             revoke_session(i, !sessions[i].admitted, "session_expired_heartbeat");
         }
+    }
+}
+
+static esp_err_t perform_supabase_session_update(const char *token,
+                                                 const char *device_hash,
+                                                 int remaining_seconds,
+                                                 supabase_update_mode_t mode)
+{
+    switch (mode) {
+        case SUPABASE_UPDATE_ACTIVE:
+            return supabase_create_session(token, device_hash, remaining_seconds);
+        case SUPABASE_UPDATE_DISCONNECTED:
+            return supabase_mark_disconnected(token, device_hash, remaining_seconds);
+        case SUPABASE_UPDATE_EXPIRED:
+        default:
+            return supabase_update_heartbeat(token, device_hash, 0);
+    }
+}
+
+static void supabase_update_task(void *pvParameters)
+{
+    pending_supabase_update_t update;
+
+    (void)pvParameters;
+
+    while (true) {
+        if (xQueueReceive(s_supabase_update_queue, &update, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+
+        esp_err_t err = perform_supabase_session_update(update.token,
+                                                        update.device_hash,
+                                                        update.remaining_seconds,
+                                                        (supabase_update_mode_t)update.mode);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG_WEB,
+                     "Deferred Supabase session update failed for status=%s: %s",
+                     update.mode == SUPABASE_UPDATE_ACTIVE ? "active" :
+                     update.mode == SUPABASE_UPDATE_DISCONNECTED ? "disconnected" : "expired",
+                     esp_err_to_name(err));
+        }
+    }
+}
+
+static void ensure_supabase_update_task_started(void)
+{
+    if (s_supabase_update_queue == NULL) {
+        s_supabase_update_queue = xQueueCreate(8, sizeof(pending_supabase_update_t));
+        if (s_supabase_update_queue == NULL) {
+            ESP_LOGE(TAG_WEB, "Failed to create Supabase update queue");
+            return;
+        }
+    }
+
+    if (s_supabase_update_task_started) {
+        return;
+    }
+
+    if (xTaskCreate(supabase_update_task,
+                    "supabase_updates",
+                    6144,
+                    NULL,
+                    tskIDLE_PRIORITY + 1,
+                    NULL) == pdPASS) {
+        s_supabase_update_task_started = true;
+        ESP_LOGI(TAG_WEB, "Supabase deferred update task started");
+    } else {
+        ESP_LOGE(TAG_WEB, "Failed to start Supabase deferred update task");
+    }
+}
+
+static void queue_supabase_session_update(const char *token,
+                                          const char *device_hash,
+                                          int remaining_seconds,
+                                          supabase_update_mode_t mode)
+{
+    pending_supabase_update_t update = {0};
+
+    ensure_supabase_update_task_started();
+    if (s_supabase_update_queue == NULL) {
+        return;
+    }
+
+    strlcpy(update.token, token, sizeof(update.token));
+    strlcpy(update.device_hash, device_hash, sizeof(update.device_hash));
+    update.remaining_seconds = remaining_seconds;
+    update.mode = (int)mode;
+
+    if (xQueueSend(s_supabase_update_queue, &update, 0) != pdTRUE) {
+        ESP_LOGW(TAG_WEB, "Supabase update queue is full; dropping %s update",
+                 mode == SUPABASE_UPDATE_ACTIVE ? "active" :
+                 mode == SUPABASE_UPDATE_DISCONNECTED ? "disconnected" : "expired");
     }
 }
 
@@ -1755,6 +1944,7 @@ httpd_handle_t start_webserver(void)
 {
     init_sessions();
     supabase_init();
+    ensure_supabase_update_task_started();
     ensure_heartbeat_task_started();
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();

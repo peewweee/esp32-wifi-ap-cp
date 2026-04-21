@@ -421,6 +421,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         memcpy(last_ap_client_mac, event->mac, sizeof(last_ap_client_mac));
         last_ap_client_mac_valid = true;
         ESP_LOGI(TAG,"%d. station connected", connect_count);
+        handle_client_connect(event->mac);
         net_diag_log_snapshot("ap_client_connected");
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED)
