@@ -62,8 +62,9 @@ static const char *TAG_ADMIN = "ADMIN_SERVER";
 #define QUOTA_BLOB_KEY "quota_tab_v1"
 #define QUOTA_DAY_HINT_KEY "quota_day_hint"
 #define QUOTA_FLUSH_INTERVAL_US (60 * 1000000LL)
-#define PWA_DASHBOARD_URL "https://spcs-v1.vercel.app/dashboard"
-#define PWA_LINK_URL_FORMAT PWA_DASHBOARD_URL "/link?session_token=%s"
+#define PWA_DASHBOARD_URL "https://spcs-v1.vercel.app"
+#define PWA_LINK_URL_FORMAT PWA_DASHBOARD_URL "/?session_token=%s"
+#define DEV_RESET_QUOTA_ON_BOOT 1
 
 // --- PER-DEVICE SESSION STRUCTURE ---
 typedef struct {
@@ -331,6 +332,15 @@ static void load_quota_state(void)
         ESP_LOGW(TAG_WEB, "Failed to open NVS for quota state: %s", esp_err_to_name(err));
         return;
     }
+
+#if DEV_RESET_QUOTA_ON_BOOT
+    ESP_LOGW(TAG_WEB, "DEV_RESET_QUOTA_ON_BOOT is enabled; clearing stored quota state");
+    nvs_erase_key(nvs, QUOTA_BLOB_KEY);
+    nvs_erase_key(nvs, QUOTA_DAY_HINT_KEY);
+    nvs_commit(nvs);
+    nvs_close(nvs);
+    return;
+#endif
 
     err = nvs_get_blob(nvs, QUOTA_BLOB_KEY, s_quota_records, &len);
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
