@@ -574,6 +574,16 @@ static bool get_any_connected_client_mac(uint8_t mac_out[6])
     return true;
 }
 
+static bool get_cached_ap_client_mac(uint8_t mac_out[6])
+{
+    if (mac_out == NULL || !last_ap_client_mac_valid) {
+        return false;
+    }
+
+    memcpy(mac_out, last_ap_client_mac, 6);
+    return true;
+}
+
 static bool get_client_mac_for_ip(uint32_t ip, uint8_t mac_out[6])
 {
     wifi_sta_list_t sta_list = {0};
@@ -1534,6 +1544,14 @@ static esp_err_t confirm_handler(httpd_req_t *req)
     net_diag_log_snapshot("confirm_handler");
 
     have_mac = get_client_mac_for_ip(ip, client_mac);
+    if (!have_mac && get_cached_ap_client_mac(client_mac)) {
+        have_mac = true;
+        ESP_LOGW(TAG_WEB, "Falling back to cached AP station MAC for /confirm");
+    }
+    if (!have_mac && get_any_connected_client_mac(client_mac)) {
+        have_mac = true;
+        ESP_LOGW(TAG_WEB, "Falling back to first connected station MAC for /confirm");
+    }
 
     if (have_mac) {
         granted_seconds = get_quota_remaining_for_mac(client_mac, NULL);

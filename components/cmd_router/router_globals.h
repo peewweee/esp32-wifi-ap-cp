@@ -33,6 +33,8 @@ extern char* ap_passwd;
 
 extern uint16_t connect_count;
 extern bool ap_connect;
+extern uint8_t last_ap_client_mac[6];
+extern bool last_ap_client_mac_valid;
 
 extern uint32_t my_ip;
 extern uint32_t my_ap_ip;

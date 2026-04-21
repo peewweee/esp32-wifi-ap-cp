@@ -71,6 +71,8 @@ const int WIFI_CONNECTED_BIT = BIT0;
 uint16_t connect_count = 0;
 bool ap_connect = false;
 bool has_static_ip = false;
+uint8_t last_ap_client_mac[6] = {0};
+bool last_ap_client_mac_valid = false;
 
 uint32_t my_ip;
 uint32_t my_ap_ip;
@@ -414,7 +416,10 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED)
     {
+        wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
         connect_count++;
+        memcpy(last_ap_client_mac, event->mac, sizeof(last_ap_client_mac));
+        last_ap_client_mac_valid = true;
         ESP_LOGI(TAG,"%d. station connected", connect_count);
         net_diag_log_snapshot("ap_client_connected");
     }
@@ -424,6 +429,10 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         connect_count--;
         ESP_LOGI(TAG,"station disconnected - %d remain", connect_count);
         handle_client_disconnect(event->mac);
+        if (last_ap_client_mac_valid && memcmp(last_ap_client_mac, event->mac, sizeof(last_ap_client_mac)) == 0) {
+            memset(last_ap_client_mac, 0, sizeof(last_ap_client_mac));
+            last_ap_client_mac_valid = false;
+        }
         net_diag_log_snapshot("ap_client_disconnected");
     }
 }

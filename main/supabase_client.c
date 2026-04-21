@@ -33,6 +33,11 @@ static bool uses_legacy_jwt_key(void)
     return strncmp(SUPABASE_API_KEY, "sb_", 3) != 0;
 }
 
+static const char *supabase_auth_mode_name(void)
+{
+    return uses_legacy_jwt_key() ? "legacy Bearer JWT" : "sb_* secret key";
+}
+
 static bool format_timestamp_utc(time_t timestamp, char *buf, size_t buf_len)
 {
     struct tm tm_utc = {0};
@@ -112,10 +117,8 @@ static esp_err_t perform_request(esp_http_client_method_t method,
     }
 
     esp_http_client_set_header(client, "apikey", SUPABASE_API_KEY);
-    if (uses_legacy_jwt_key()) {
-        snprintf(auth_header, sizeof(auth_header), "Bearer %s", SUPABASE_API_KEY);
-        esp_http_client_set_header(client, "Authorization", auth_header);
-    }
+    snprintf(auth_header, sizeof(auth_header), "Bearer %s", SUPABASE_API_KEY);
+    esp_http_client_set_header(client, "Authorization", auth_header);
     esp_http_client_set_header(client, "Content-Type", "application/json");
     esp_http_client_set_header(client, "Accept", "application/json");
     if (prefer_header != NULL && prefer_header[0] != '\0') {
@@ -144,11 +147,16 @@ static esp_err_t perform_request(esp_http_client_method_t method,
              http_method_name(method),
              path,
              status_code);
+    if (response_len > 0) {
+        ESP_LOGI(TAG, "Supabase response body: %s", response_buf);
+    }
     esp_http_client_cleanup(client);
 
     if (status_code >= 200 && status_code < 300) {
         return ESP_OK;
     }
+
+    ESP_LOGE(TAG, "Supabase request failed for %s with HTTP %d", path, status_code);
 
     return ESP_FAIL;
 }
@@ -162,12 +170,13 @@ void supabase_init(void)
     s_initialized = true;
 
     if (has_placeholder_key()) {
-        ESP_LOGW(TAG, "Supabase client initialized without a real API key");
+        ESP_LOGW(TAG, "Supabase client initialized without a real API key; writes will fail until SUPABASE_API_KEY is set at build time");
         return;
     }
 
-    ESP_LOGI(TAG, "Supabase client initialized using %s auth mode",
-             uses_legacy_jwt_key() ? "legacy Bearer JWT" : "apikey-only secret key");
+    ESP_LOGI(TAG, "Supabase client initialized for %s using %s",
+             SUPABASE_BASE_URL,
+             supabase_auth_mode_name());
 }
 
 static esp_err_t supabase_upsert_session(const char *session_token,
@@ -186,6 +195,7 @@ static esp_err_t supabase_upsert_session(const char *session_token,
     if (session_token == NULL || session_token[0] == '\0' ||
         device_hash == NULL || device_hash[0] == '\0' ||
         status == NULL || status[0] == '\0') {
+        ESP_LOGE(TAG, "Refusing Supabase upsert because session_token/device_hash/status is missing");
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -199,9 +209,12 @@ static esp_err_t supabase_upsert_session(const char *session_token,
         format_timestamp_utc(end_time, session_end, sizeof(session_end));
         format_timestamp_utc(now, heartbeat, sizeof(heartbeat));
         snprintf(body, sizeof(body),
-                 "{\"session_token\":\"%s\",\"device_hash\":\"%s\",\"session_end\":\"%s\","
+                 "{\"token\":\"%s\",\"mac_hash\":\"%s\","
+                 "\"session_token\":\"%s\",\"device_hash\":\"%s\",\"session_end\":\"%s\","
                  "\"remaining_seconds\":%d,\"status\":\"%s\",\"ap_connected\":%s,"
                  "\"last_heartbeat\":\"%s\"}",
+                 session_token,
+                 device_hash,
                  session_token,
                  device_hash,
                  session_end,
@@ -212,8 +225,11 @@ static esp_err_t supabase_upsert_session(const char *session_token,
     } else {
         ESP_LOGW(TAG, "System clock is not set; session upsert will omit timestamps");
         snprintf(body, sizeof(body),
-                 "{\"session_token\":\"%s\",\"device_hash\":\"%s\",\"remaining_seconds\":%d,"
+                 "{\"token\":\"%s\",\"mac_hash\":\"%s\","
+                 "\"session_token\":\"%s\",\"device_hash\":\"%s\",\"remaining_seconds\":%d,"
                  "\"status\":\"%s\",\"ap_connected\":%s}",
+                 session_token,
+                 device_hash,
                  session_token,
                  device_hash,
                  safe_remaining,
@@ -221,8 +237,16 @@ static esp_err_t supabase_upsert_session(const char *session_token,
                  ap_connected ? "true" : "false");
     }
 
+    ESP_LOGI(TAG, "Upserting session to Supabase: token=%s device_hash=%s status=%s remaining=%d ap_connected=%s",
+             session_token,
+             device_hash,
+             status,
+             safe_remaining,
+             ap_connected ? "true" : "false");
+    ESP_LOGI(TAG, "Supabase target table: public.sessions");
+
     return perform_request(HTTP_METHOD_POST,
-                           "/rest/v1/sessions?on_conflict=session_token",
+                           "/rest/v1/sessions?on_conflict=token",
                            body,
                            "resolution=merge-duplicates,return=representation");
 }

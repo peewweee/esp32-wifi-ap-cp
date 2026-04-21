@@ -2,10 +2,10 @@
 # in this exact order for cmake to work correctly
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_SUPABASE_BASE_URL "https://pzkatqdyxexkevyccjzm.supabase.co" CACHE INTERNAL "")
-set(PROJECT_SUPABASE_API_KEY "REPLACE_WITH_SUPABASE_SECRET_KEY" CACHE INTERNAL "")
-set(PROJECT_ADMIN_USERNAME "admin" CACHE INTERNAL "")
-set(PROJECT_ADMIN_PASSWORD "admin123" CACHE INTERNAL "")
+set(PROJECT_SUPABASE_BASE_URL "" CACHE INTERNAL "" FORCE)
+set(PROJECT_SUPABASE_API_KEY "" CACHE INTERNAL "" FORCE)
+set(PROJECT_ADMIN_USERNAME "admin" CACHE INTERNAL "" FORCE)
+set(PROJECT_ADMIN_PASSWORD "admin123" CACHE INTERNAL "" FORCE)
 
 set(PROJECT_ENV_FILE "${CMAKE_CURRENT_LIST_DIR}/.env")
 if(EXISTS "${PROJECT_ENV_FILE}")
@@ -17,15 +17,23 @@ if(EXISTS "${PROJECT_ENV_FILE}")
         endif()
 
         if(PROJECT_ENV_LINE MATCHES "^SUPABASE_BASE_URL=(.*)$")
-            set(PROJECT_SUPABASE_BASE_URL "${CMAKE_MATCH_1}" CACHE INTERNAL "")
+            set(PROJECT_SUPABASE_BASE_URL "${CMAKE_MATCH_1}" CACHE INTERNAL "" FORCE)
         elseif(PROJECT_ENV_LINE MATCHES "^SUPABASE_API_KEY=(.*)$")
-            set(PROJECT_SUPABASE_API_KEY "${CMAKE_MATCH_1}" CACHE INTERNAL "")
+            set(PROJECT_SUPABASE_API_KEY "${CMAKE_MATCH_1}" CACHE INTERNAL "" FORCE)
         elseif(PROJECT_ENV_LINE MATCHES "^ADMIN_USERNAME=(.*)$")
-            set(PROJECT_ADMIN_USERNAME "${CMAKE_MATCH_1}" CACHE INTERNAL "")
+            set(PROJECT_ADMIN_USERNAME "${CMAKE_MATCH_1}" CACHE INTERNAL "" FORCE)
         elseif(PROJECT_ENV_LINE MATCHES "^ADMIN_PASSWORD=(.*)$")
-            set(PROJECT_ADMIN_PASSWORD "${CMAKE_MATCH_1}" CACHE INTERNAL "")
+            set(PROJECT_ADMIN_PASSWORD "${CMAKE_MATCH_1}" CACHE INTERNAL "" FORCE)
         endif()
     endforeach()
+endif()
+
+if(PROJECT_SUPABASE_BASE_URL STREQUAL "")
+    message(WARNING "SUPABASE_BASE_URL is not set. Add it to .env before building.")
+endif()
+
+if(PROJECT_SUPABASE_API_KEY STREQUAL "")
+    message(WARNING "SUPABASE_API_KEY is not set. Session writes to Supabase will fail until a real key is provided via .env.")
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
