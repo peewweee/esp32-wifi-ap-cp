@@ -1245,10 +1245,16 @@ static esp_err_t api_status_handler(httpd_req_t *req)
     uint32_t ip = get_client_ip(req);
     int remaining_seconds = get_remaining_seconds(ip);
     bool is_connected = (remaining_seconds > 0);
+    bool upstream_ready = ap_connect;
     if (remaining_seconds < 0) remaining_seconds = 0;
 
-    char resp_buf[100]; 
-    snprintf(resp_buf, sizeof(resp_buf), "{\"authenticated\": %s, \"remaining_seconds\": %d}", is_connected ? "true" : "false", remaining_seconds);
+    char resp_buf[140]; 
+    snprintf(resp_buf,
+             sizeof(resp_buf),
+             "{\"authenticated\": %s, \"remaining_seconds\": %d, \"upstream_ready\": %s}",
+             is_connected ? "true" : "false",
+             remaining_seconds,
+             upstream_ready ? "true" : "false");
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*"); 
     httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -1589,6 +1595,24 @@ static esp_err_t portal_handler(httpd_req_t *req)
         "   if (checkBox.checked){ btn.style.pointerEvents = 'auto'; btn.style.opacity = '1'; } "
         "   else { btn.style.pointerEvents = 'none'; btn.style.opacity = '0.5'; }"
         " }"
+        " var connectPollTimer = null;"
+        " function pollUpstreamAndContinue() {"
+        "   var status = document.getElementById('connectingStatus');"
+        "   fetch('/api/status', { cache: 'no-store' })"
+        "     .then(function(res){ return res.json(); })"
+        "     .then(function(data){"
+        "       if (data && data.upstream_ready) {"
+        "         window.location.href='/confirm';"
+        "         return;"
+        "       }"
+        "       status.textContent = 'Waiting for SOLAR CONNECT to finish connecting to the internet...';"
+        "       connectPollTimer = window.setTimeout(pollUpstreamAndContinue, 1500);"
+        "     })"
+        "     .catch(function(){"
+        "       status.textContent = 'Checking internet readiness...';"
+        "       connectPollTimer = window.setTimeout(pollUpstreamAndContinue, 1500);"
+        "     });"
+        " }"
         " function startConnecting(event) {"
         "   event.preventDefault();"
         "   var btn = document.getElementById('connectBtn');"
@@ -1597,7 +1621,9 @@ static esp_err_t portal_handler(httpd_req_t *req)
         "   btn.classList.add('loading');"
         "   btn.textContent = 'Connecting...';"
         "   status.style.display = 'block';"
-        "   window.setTimeout(function(){ window.location.href='/confirm'; }, 700);"
+        "   status.textContent = 'Waiting for SOLAR CONNECT to finish connecting to the internet...';"
+        "   if (connectPollTimer !== null) { window.clearTimeout(connectPollTimer); }"
+        "   pollUpstreamAndContinue();"
         "   return false;"
         " }"
         "</script>"
@@ -1913,8 +1939,8 @@ static esp_err_t confirm_handler(httpd_req_t *req)
     "        <img src='/dashboard.png' class='p-img'/>"
     "      </div>"
     "      <div class='right-col'>"
-    "        <h2>Explore the dashboard</h2>"
-    "        <a href='%s' target='_blank' class='btn'>Solar-Powered Bench</a>"
+    "        <h2>Get your unique link</h2>"
+    "        <a href='%s' target='_blank' class='btn'>Explore the dashboard</a>"
     "        <img src='/dashboard-ui.png' class='d-img'/>"
     "      </div>"
     "    </div>"
