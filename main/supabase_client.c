@@ -269,3 +269,11 @@ esp_err_t supabase_mark_disconnected(const char *session_token, const char *devi
 {
     return supabase_upsert_session(session_token, device_hash, remaining_sec, false, "disconnected");
 }
+
+esp_err_t supabase_post_upsert(const char *path, const char *json_body)
+{
+    if (path == NULL || json_body == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return perform_request(HTTP_METHOD_POST, path, json_body, "resolution=merge-duplicates");
+}

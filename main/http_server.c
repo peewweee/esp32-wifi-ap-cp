@@ -27,6 +27,7 @@
 #include "router_globals.h"
 
 #include "pages.h"
+#include "admin_ports.h"
 #include "net_diag.h"
 #include "supabase_client.h"
 #include "freertos/FreeRTOS.h"
@@ -2040,6 +2041,10 @@ httpd_handle_t start_webserver(void)
     httpd_register_uri_handler(server, &phone_uri);
     httpd_uri_t dash_uri = { .uri = "/dashboard-ui.png", .method = HTTP_GET, .handler = img_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &dash_uri);
+
+    /* Register /ports test admin page + its APIs before the catch-all. */
+    admin_ports_register_handlers(server);
+
     httpd_uri_t catch_all_uri = { .uri = "/*", .method = HTTP_GET, .handler = catch_all_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &catch_all_uri);
     httpd_uri_t catch_all_head_uri = { .uri = "/*", .method = HTTP_HEAD, .handler = catch_all_handler, .user_ctx = NULL };

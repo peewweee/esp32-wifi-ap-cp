@@ -11,6 +11,12 @@
 -- The TABLE section can be applied as-is. The FUNCTION section contains
 -- SIGNATURES ONLY — bodies must be pasted from Supabase Studio (the REST
 -- API cannot export function definitions). See the helper RPC at the bottom.
+--
+-- ⚠️  DO NOT paste this entire file into the SQL Editor of the existing
+--     live project. The function stubs below would OVERWRITE the three
+--     working RPCs (claim_session_link, resolve_installation_session,
+--     cleanup_old_sessions) with bodies that just raise an exception.
+--     To add new tables / indexes / grants, run ONLY the relevant section.
 -- ============================================================================
 
 create extension if not exists pgcrypto;
@@ -63,6 +69,54 @@ create index if not exists sessions_installation_id_idx on public.sessions (inst
 create index if not exists sessions_last_heartbeat_idx  on public.sessions (last_heartbeat desc);
 
 -- ----------------------------------------------------------------------------
+-- TABLE: public.port_state
+-- ----------------------------------------------------------------------------
+-- One row per (station_id, port_key). The ESP32 upserts on every port
+-- status change (via /api/ports -> supabase_post_upsert). The PWA reads
+-- these rows to render the "Available Ports" section on the dashboard.
+-- ----------------------------------------------------------------------------
+create table if not exists public.port_state (
+    id          bigint generated always as identity primary key,
+    station_id  text not null default 'solar-hub-01',
+    port_key    text not null
+        check (port_key in ('usb_a_1','usb_a_2','usb_c_1','usb_c_2','outlet')),
+    status      text not null default 'available'
+        check (status in ('available','in_use','fault','offline')),
+    updated_at  timestamptz not null default now(),
+    unique (station_id, port_key)
+);
+create index if not exists port_state_station_idx on public.port_state (station_id);
+
+-- ----------------------------------------------------------------------------
+-- TABLE: public.station_state
+-- ----------------------------------------------------------------------------
+-- One row per station. Holds station-wide metrics not attributable to a
+-- specific port (battery level, future: solar watts, card_present, etc.).
+-- ----------------------------------------------------------------------------
+create table if not exists public.station_state (
+    station_id      text primary key default 'solar-hub-01',
+    battery_percent numeric check (battery_percent between 0 and 100),
+    updated_at      timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------------------
+-- Shared trigger: keep updated_at fresh on any UPDATE.
+-- Reused by port_state and station_state. Safe to re-run.
+-- ----------------------------------------------------------------------------
+create or replace function public.set_updated_at()
+returns trigger language plpgsql as $$
+begin new.updated_at = now(); return new; end;
+$$;
+
+drop trigger if exists port_state_touch on public.port_state;
+create trigger port_state_touch before update on public.port_state
+    for each row execute function public.set_updated_at();
+
+drop trigger if exists station_state_touch on public.station_state;
+create trigger station_state_touch before update on public.station_state
+    for each row execute function public.set_updated_at();
+
+-- ----------------------------------------------------------------------------
 -- SECURITY MODEL (as of 2026-04-24)
 -- ----------------------------------------------------------------------------
 -- RLS is effectively OFF. The anon key can SELECT and UPDATE rows
@@ -76,8 +130,13 @@ create index if not exists sessions_last_heartbeat_idx  on public.sessions (last
 -- real users, enable RLS on public.sessions and restrict direct access so
 -- that only the three RPCs below can touch the table.
 -- ----------------------------------------------------------------------------
-alter table public.sessions disable row level security;
-grant select, insert, update, delete on public.sessions to anon, authenticated;
+alter table public.sessions       disable row level security;
+alter table public.port_state     disable row level security;
+alter table public.station_state  disable row level security;
+
+grant select, insert, update, delete on public.sessions      to anon, authenticated;
+grant select, insert, update         on public.port_state    to anon, authenticated;
+grant select, insert, update         on public.station_state to anon, authenticated;
 
 -- ----------------------------------------------------------------------------
 -- FUNCTIONS (RPC surface)
