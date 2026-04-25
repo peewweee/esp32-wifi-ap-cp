@@ -278,7 +278,7 @@ This is the primary implemented user flow.
 7. If uplink is available, NAT access is enabled
 8. The connected page is shown
 9. The connected page exposes the one-time PWA link:
-   `https://spcs-v1.vercel.app/?session_token=<token>`
+   `https://solarconnect.live/?session_token=<token>`
 10. The PWA binds the browser installation to the ESP32 device identity
 
 ### 6.3 User Flow B: Remote or Off-Station Dashboard Access

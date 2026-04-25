@@ -93,7 +93,7 @@ Other notable files:
   Image assets flashed into the SPIFFS `storage` partition
 
 External-but-coupled systems not stored in this repo:
-- The Vercel PWA reached through `https://spcs-v1.vercel.app`
+- The Vercel PWA reached through `https://solarconnect.live`
 - The Supabase backend configured through `.env` or CMake cache variables
 - The physical solar/charging/RFID subsystem described in the thesis narrative
 
@@ -239,11 +239,11 @@ UI/asset sources:
 Branding and handoff:
 - The captive portal and connected page are branded as `SOLAR CONNECT`
 - The connected page links out to:
-  `https://spcs-v1.vercel.app/?session_token=<token>`
+  `https://solarconnect.live/?session_token=<token>`
 
 PWA recovery design:
 - The generic dashboard route is expected to be:
-  `https://spcs-v1.vercel.app`
+  `https://solarconnect.live`
 - If the generic dashboard cannot resolve a linked installation, it should instruct the user to connect to `SOLAR CONNECT`
 - The recommended manual recovery action is a link to:
   `http://192.168.4.1/`

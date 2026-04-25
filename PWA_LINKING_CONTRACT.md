@@ -67,8 +67,8 @@ Important design rule:
 ## Expected routes
 
 Routes currently expected by the firmware:
-- Generic app: `https://spcs-v1.vercel.app`
-- One-time link route: `https://spcs-v1.vercel.app/?session_token=<token>`
+- Generic app: `https://solarconnect.live`
+- One-time link route: `https://solarconnect.live/?session_token=<token>`
 
 Local recovery route served by the ESP32:
 - `http://192.168.4.1/`
@@ -87,7 +87,7 @@ The PWA should treat this as the browser-install identity.
 ### 2. Generic dashboard route behavior
 
 Route:
-- `https://spcs-v1.vercel.app`
+- `https://solarconnect.live`
 
 Behavior:
 1. read `installation_id`
@@ -110,7 +110,7 @@ Recommended unresolved-state UI:
 ### 3. One-time linking route behavior
 
 Route:
-- `https://spcs-v1.vercel.app/?session_token=<token>`
+- `https://solarconnect.live/?session_token=<token>`
 
 Behavior:
 1. read `session_token` from the URL
@@ -119,7 +119,7 @@ Behavior:
 4. after success, remove the token from the visible URL by redirecting to the clean app root route
 
 Recommended redirect target after success:
-- `https://spcs-v1.vercel.app`
+- `https://solarconnect.live`
 
 Reason:
 - avoids leaving `session_token` in browser history, screenshots, or accidental shares

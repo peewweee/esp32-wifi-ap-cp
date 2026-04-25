@@ -63,7 +63,7 @@ static const char *TAG_ADMIN = "ADMIN_SERVER";
 #define QUOTA_BLOB_KEY "quota_tab_v1"
 #define QUOTA_DAY_HINT_KEY "quota_day_hint"
 #define QUOTA_FLUSH_INTERVAL_US (60 * 1000000LL)
-#define PWA_DASHBOARD_URL "https://spcs-v1.vercel.app"
+#define PWA_DASHBOARD_URL "https://solarconnect.live"
 #define PWA_LINK_URL_FORMAT PWA_DASHBOARD_URL "/?session_token=%s"
 #define DEV_RESET_QUOTA_ON_BOOT 1
 
