@@ -1,4 +1,4 @@
-idf_component_register(SRCS "admin_ports.c" "rfid_reader.c" "esp32_nat_router.c"
+idf_component_register(SRCS "eco_metrics.c" "port_sensors.c" "admin_ports.c" "rfid_reader.c" "esp32_nat_router.c"
                             "http_server.c"
                             "dns_server.c"
                             "net_diag.c"

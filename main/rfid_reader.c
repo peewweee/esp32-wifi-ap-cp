@@ -8,12 +8,33 @@
 /* Flip to 1 when the MFRC522 hardware is wired and ready for bring-up. */
 #define RFID_ENABLED 0
 
-/* Default wiring (SPI) — adjust to match your actual connections. */
-#define RFID_PIN_RST   22
-#define RFID_PIN_SS    21
+/* Wiring taken from the hardware schematic (matches the teammate's Arduino
+ * bring-up sketch). ESP32 VSPI == ESP-IDF SPI3_HOST.
+ *
+ *   MFRC522 <-> ESP32
+ *     SDA  -> GPIO 5   (chip select / SS)
+ *     SCK  -> GPIO 18
+ *     MOSI -> GPIO 23
+ *     MISO -> GPIO 19
+ *     RST  -> GPIO 4
+ *     IRQ  -> not connected
+ *     3V3  -> 3V3
+ *     GND  -> GND
+ *
+ * Power-control pins owned by a separate station_power module (not RFID):
+ *   MOSFETs / SSR / relay: GPIO {12, 14, 27, 26, 25, 13}
+ *   (GPIO 12 is a boot-strapping pin — keep it pulled LOW at boot.)
+ *
+ * When RFID_ENABLED=1 the station state machine should toggle the power
+ * pins based on card presence; rfid_reader just reports presence here.
+ */
+#define RFID_PIN_SS    5
+#define RFID_PIN_RST   4
 #define RFID_PIN_SCK   18
 #define RFID_PIN_MOSI  23
 #define RFID_PIN_MISO  19
+/* Arduino's default SPI on ESP32 == VSPI == SPI3_HOST in ESP-IDF. */
+#define RFID_SPI_HOST  SPI3_HOST
 
 #define RFID_POLL_MS       500  /* how often to poll the reader */
 #define RFID_ABSENT_READS  3    /* consecutive empty reads before declaring absent */
