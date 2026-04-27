@@ -28,6 +28,7 @@
 
 #include "pages.h"
 #include "admin_ports.h"
+#include "client_acl.h"
 #include "net_diag.h"
 #include "supabase_client.h"
 #include "freertos/FreeRTOS.h"
@@ -173,6 +174,7 @@ void init_sessions() {
     for (int i = 0; i < MAX_CLIENTS; i++) {
         memset(&sessions[i], 0, sizeof(sessions[i]));
     }
+    client_acl_init();
     load_quota_state();
 }
 
@@ -478,6 +480,12 @@ static void refresh_portal_auth_state(const char *reason)
 
         if (sessions[i].end_time > 0 && sessions[i].end_time <= now) {
             checkpoint_session_usage(&sessions[i], now, true);
+            if (sessions[i].ip_addr != 0) {
+                client_acl_revoke_by_ip(sessions[i].ip_addr);
+            }
+            if (!mac_is_zero(sessions[i].mac)) {
+                client_acl_revoke_by_mac(sessions[i].mac);
+            }
             sessions[i].active = false;
             continue;
         }
@@ -707,6 +715,7 @@ static client_session_t *start_or_resume_session(uint32_t ip,
                 strlcpy(sessions[session_index].device_hash, device_hash, sizeof(sessions[session_index].device_hash));
             }
             refresh_portal_auth_state("session_reused");
+            client_acl_admit(ip, mac);
             ESP_LOGI(TAG_WEB, "Session exists for IP %lu. Keeping existing time.", ip);
             net_diag_log_snapshot("session_reused");
             return &sessions[session_index];
@@ -746,6 +755,7 @@ static client_session_t *start_or_resume_session(uint32_t ip,
             s_global_session_end_time = 0;
         }
         refresh_portal_auth_state("session_resumed_by_token");
+        client_acl_admit(ip, mac);
         net_diag_log_snapshot("session_resumed_by_token");
         net_diag_schedule_probe("portal_accept");
         return &sessions[session_index];
@@ -781,6 +791,7 @@ static client_session_t *start_or_resume_session(uint32_t ip,
         s_global_session_end_time = 0;
     }
     refresh_portal_auth_state("session_started");
+    client_acl_admit(ip, mac);
     ESP_LOGI(TAG_WEB, "Starting session for IP: %lu", ip);
     net_diag_log_snapshot("session_started");
     net_diag_schedule_probe("portal_accept");
@@ -829,6 +840,12 @@ static void revoke_session(int session_index, bool disconnected, const char *rea
     }
     if (sessions[session_index].device_hash[0] != '\0') {
         strlcpy(device_hash, sessions[session_index].device_hash, sizeof(device_hash));
+    }
+    if (sessions[session_index].ip_addr != 0) {
+        client_acl_revoke_by_ip(sessions[session_index].ip_addr);
+    }
+    if (!mac_is_zero(sessions[session_index].mac)) {
+        client_acl_revoke_by_mac(sessions[session_index].mac);
     }
 
     sessions[session_index].admitted = false;
@@ -957,6 +974,7 @@ int get_remaining_seconds(uint32_t ip) {
                 }
 
                 sessions[session_index].ip_addr = ip;
+                client_acl_admit(ip, client_mac);
                 return (int)(remaining / 1000000LL);
             }
         }
@@ -1661,6 +1679,12 @@ static esp_err_t portal_handler(httpd_req_t *req)
  */
 static esp_err_t send_redirect_to_portal(httpd_req_t *req)
 {
+    ip4_addr_t client_ip = { .addr = get_client_ip(req) };
+
+    ESP_LOGI(TAG_WEB, "Captive redirect for %s from " IPSTR,
+             req->uri,
+             IP2STR(&client_ip));
+
     httpd_resp_set_status(req, "302 Found");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     httpd_resp_set_hdr(req, "Pragma", "no-cache");
@@ -1680,6 +1704,12 @@ static esp_err_t send_redirect_to_portal(httpd_req_t *req)
 
 static esp_err_t send_probe_success(httpd_req_t *req)
 {
+    ip4_addr_t client_ip = { .addr = get_client_ip(req) };
+
+    ESP_LOGI(TAG_WEB, "Captive probe success for %s from " IPSTR,
+             req->uri,
+             IP2STR(&client_ip));
+
     if (strcmp(req->uri, "/generate_204") == 0 || strcmp(req->uri, "/gen_204") == 0) {
         httpd_resp_set_status(req, "204 No Content");
         httpd_resp_send(req, NULL, 0);
@@ -1985,7 +2015,7 @@ httpd_handle_t start_webserver(void)
     ensure_heartbeat_task_started();
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 20;
+    config.max_uri_handlers = 40;
     config.stack_size = 8192;
     config.uri_match_fn = httpd_uri_match_wildcard;
     esp_timer_create(&restart_timer_args, &restart_timer);
@@ -2019,18 +2049,30 @@ httpd_handle_t start_webserver(void)
     httpd_register_uri_handler(server, &admin_post_uri);
     httpd_uri_t gen_204_uri = { .uri = "/generate_204", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &gen_204_uri);
+    httpd_uri_t gen_204_head_uri = { .uri = "/generate_204", .method = HTTP_HEAD, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &gen_204_head_uri);
     httpd_uri_t gen_204_alt_uri = { .uri = "/gen_204", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &gen_204_alt_uri);
+    httpd_uri_t gen_204_alt_head_uri = { .uri = "/gen_204", .method = HTTP_HEAD, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &gen_204_alt_head_uri);
     httpd_uri_t connectivity_check_uri = { .uri = "/connectivity-check.html", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &connectivity_check_uri);
+    httpd_uri_t connectivity_check_head_uri = { .uri = "/connectivity-check.html", .method = HTTP_HEAD, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &connectivity_check_head_uri);
     httpd_uri_t hotspot_uri = { .uri = "/hotspot-detect.html", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &hotspot_uri);
+    httpd_uri_t hotspot_head_uri = { .uri = "/hotspot-detect.html", .method = HTTP_HEAD, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &hotspot_head_uri);
     httpd_uri_t apple_success_uri = { .uri = "/library/test/success.html", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &apple_success_uri);
     httpd_uri_t windows_connecttest_uri = { .uri = "/connecttest.txt", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &windows_connecttest_uri);
     httpd_uri_t windows_ncsi_uri = { .uri = "/ncsi.txt", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &windows_ncsi_uri);
+    httpd_uri_t android_mobile_status_uri = { .uri = "/mobile/status.php", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &android_mobile_status_uri);
+    httpd_uri_t success_txt_uri = { .uri = "/success.txt", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
+    httpd_register_uri_handler(server, &success_txt_uri);
     httpd_uri_t windows_redirect_uri = { .uri = "/redirect", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
     httpd_register_uri_handler(server, &windows_redirect_uri);
     httpd_uri_t microsoft_fwlink_uri = { .uri = "/fwlink", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };

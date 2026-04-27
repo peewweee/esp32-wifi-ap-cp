@@ -1,4 +1,10 @@
-idf_component_register(SRCS "eco_metrics.c" "port_sensors.c" "admin_ports.c" "rfid_reader.c" "esp32_nat_router.c"
+idf_component_register(SRCS "lwip_hooks.c"
+                            "client_acl.c"
+                            "eco_metrics.c"
+                            "port_sensors.c"
+                            "admin_ports.c"
+                            "rfid_reader.c"
+                            "esp32_nat_router.c"
                             "http_server.c"
                             "dns_server.c"
                             "net_diag.c"
@@ -33,3 +39,13 @@ set_source_files_properties(http_server.c
     PROPERTIES COMPILE_FLAGS
     -Wno-unused-function
 )
+
+idf_component_get_property(LWIP_LIB lwip COMPONENT_LIB)
+if(LWIP_LIB)
+    target_compile_definitions(${LWIP_LIB} PUBLIC
+        ESP_IDF_LWIP_HOOK_FILENAME="lwip_hooks.h"
+    )
+    target_include_directories(${LWIP_LIB} PUBLIC
+        "${CMAKE_CURRENT_LIST_DIR}"
+    )
+endif()
