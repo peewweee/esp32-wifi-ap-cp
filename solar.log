@@ -1,0 +1,783 @@
+--- Terminal on COM5 | 115200 8-N-1
+--- Available filters and text transformations: debug, default, direct, esp32_exception_decoder, hexlify, log2file, nocontrol, printable, send_on_enter, time
+--- More details at https://bit.ly/pio-monitor-filters
+--- Quit: Ctrl+C | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H
+ets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0030,len:5820
+ho 0 tail 12 room 4
+load:0x40078000,len:15104
+load:0x40080400,len:4
+load:0x40080404,len:3500
+entry 0x400805e4
+[0;32mI (494) cpu_start: Multicore app[0m
+[0;32mI (494) cpu_start: Pro cpu up.[0m
+[0;32mI (494) cpu_start: Starting app cpu, entry point is 0x4008236c[0m
+[0;32mI (0) cpu_start: App cpu up.[0m
+[0;32mI (512) cpu_start: Pro cpu start user code[0m
+[0;32mI (512) cpu_start: cpu freq: 240000000 Hz[0m
+[0;32mI (512) cpu_start: Application information:[0m
+[0;32mI (517) cpu_start: Project name:     esp32_nat_router[0m
+[0;32mI (522) cpu_start: App version:      b652aff-dirty[0m
+[0;32mI (528) cpu_start: Compile time:     Apr 28 2026 01:57:16[0m
+[0;32mI (534) cpu_start: ELF file SHA256:  f84263304648129c...[0m
+[0;32mI (540) cpu_start: ESP-IDF:          5.1.2[0m
+[0;32mI (545) cpu_start: Min chip rev:     v0.0[0m
+[0;32mI (549) cpu_start: Max chip rev:     v3.99 [0m
+[0;32mI (554) cpu_start: Chip rev:         v3.1[0m
+[0;32mI (559) heap_init: Initializing. RAM available for dynamic allocation:[0m
+[0;32mI (566) heap_init: At 3FFAE6E0 len 00001920 (6 KiB): DRAM[0m
+[0;32mI (572) heap_init: At 3FFB9840 len 000267C0 (153 KiB): DRAM[0m
+[0;32mI (578) heap_init: At 3FFE0440 len 00003AE0 (14 KiB): D/IRAM[0m
+[0;32mI (585) heap_init: At 3FFE4350 len 0001BCB0 (111 KiB): D/IRAM[0m
+[0;32mI (591) heap_init: At 40098558 len 00007AA8 (30 KiB): IRAM[0m
+[0;32mI (599) spi_flash: detected chip: generic[0m
+[0;32mI (602) spi_flash: flash io: dio[0m
+[0;32mI (607) app_start: Starting scheduler on CPU0[0m
+[0;32mI (611) app_start: Starting scheduler on CPU1[0m
+[0;32mI (611) main_task: Started on CPU0[0m
+[0;32mI (621) main_task: Calling app_main()[0m
+[0;32mI (651) ESP32 NAT router: Initializing SPIFFS[0m
+[0;32mI (811) ESP32 NAT router: Partition size: total: 1920401, used: 1307459[0m
+[0;32mI (821) cmd_router: ssid GangosoKingdom[0m
+[0;32mI (821) cmd_router: ent_username [0m
+[0;32mI (821) cmd_router: ent_identity [0m
+[0;32mI (821) cmd_router: passwd ********[0m
+[0;32mI (831) cmd_router: ap_ssid SOLAR CONNECT[0m
+[0;32mI (831) cmd_router: ap_passwd <empty>[0m
+I (851) wifi:wifi driver task: 3ffc407c, prio:23, stack:6656, core=0
+I (861) wifi:wifi firmware version: 91b9630
+I (861) wifi:wifi certification version: v7.0
+I (861) wifi:config NVS flash: enabled
+I (861) wifi:config nano formating: disabled
+I (871) wifi:Init data frame dynamic rx buffer num: 32
+I (871) wifi:Init static rx mgmt buffer num: 5
+I (881) wifi:Init management short buffer num: 32
+I (881) wifi:Init dynamic tx buffer num: 32
+I (891) wifi:Init static rx buffer size: 1600
+I (891) wifi:Init static rx buffer num: 10
+I (891) wifi:Init dynamic rx buffer num: 32
+[0;32mI (901) wifi_init: rx ba win: 6[0m
+[0;32mI (901) wifi_init: tcpip mbox: 32[0m
+[0;32mI (901) wifi_init: udp mbox: 6[0m
+[0;32mI (911) wifi_init: tcp mbox: 6[0m
+[0;32mI (911) wifi_init: tcp tx win: 5744[0m
+[0;32mI (921) wifi_init: tcp rx win: 5744[0m
+[0;32mI (921) wifi_init: tcp mss: 1440[0m
+[0;32mI (921) wifi_init: WiFi IRAM OP enabled[0m
+[0;32mI (931) wifi_init: WiFi RX IRAM OP enabled[0m
+[0;32mI (931) ESP32 NAT router: STA regular connection[0m
+[0;32mI (941) ESP32 NAT router: Setting AP DNS to self (192.168.4.1) for captive portal hijack.[0m
+[0;32mI (951) ESP32 NAT router: Setting AP DNS to self (192.168.4.1) for captive portal hijack.[0m
+[0;32mI (2961) phy_init: phy_version 4780,16b31a7,Sep 22 2023,20:42:16[0m
+I (3031) wifi:mode : sta (88:57:21:b1:7c:34) + softAP (88:57:21:b1:7c:35)
+I (3031) wifi:enable tsf
+I (3041) wifi:Total power save buffer number: 16
+I (3041) wifi:Init max length of beacon: 752/752
+I (3041) wifi:Init max length of beacon: 752/752
+[0;32mI (3051) ESP32 NAT router: wifi_init_apsta finished.[0m
+[0;32mI (3051) NET_DIAG: [SNAPSHOT:sta_start] uplink=0 portal=0 napt=0 napt_err=ESP_OK stations=0 ap_ip=192.168.4.1 sta_ip=0.0.0.0[0m
+[0;32mI (3061) ESP32 NAT router: connect to ap SSID: GangosoKingdom [0m
+[0;32mI (3061) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (3081) NET_DIAG: [STA] ip=0.0.0.0 gw=0.0.0.0 mask=0.0.0.0 dns=0.0.0.0[0m
+[0;32mI (3091) NET_DIAG: [SNAPSHOT:diag_task_start] uplink=0 portal=0 napt=0 napt_err=ESP_OK stations=0 ap_ip=192.168.4.1 sta_ip=0.0.0.0[0m
+I (3101) wifi:[0;32mI (3091) esp_netif_lwip: DHCP server started on interface WIFI_AP_DEF with IP: 192.168.4.1[0m
+ap channel adjust o:1,1 n:4,1
+I (3111) wifi:new:<4,1>, old:<1,1>, ap:<4,1>, sta:<4,1>, prof:1
+I (3121) wifi:state: init -> auth (b0)
+[0;32mI (3121) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (3091) NET_DIAG: [SNAPSHOT:napt_disabled] uplink=0 portal=0 napt=0 napt_err=ESP_OK stations=0 ap_ip=192.168.4.1 sta_ip=0.0.0.0[0m
+[0;32mI (3131) NET_DIAG: [STA] ip=0.0.0.0 gw=0.0.0.0 mask=0.0.0.0 dns=0.0.0.0[0m
+[0;32mI (3151) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (3161) NET_DIAG: [STA] ip=0.0.0.0 gw=0.0.0.0 mask=0.0.0.0 dns=0.0.0.0[0m
+[0;32mI (3161) NET_DIAG: [SNAPSHOT:boot] uplink=0 portal=0 napt=0 napt_err=ESP_OK stations=0 ap_ip=192.168.4.1 sta_ip=0.0.0.0[0m
+[0;32mI (3181) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (3181) NET_DIAG: [STA] ip=0.0.0.0 gw=0.0.0.0 mask=0.0.0.0 dns=0.0.0.0[0m
+[0;32mI (3191) NET_DIAG: [SNAPSHOT:post_wifi_init] uplink=0 portal=0 napt=0 napt_err=ESP_OK stations=0 ap_ip=192.168.4.1 sta_ip=0.0.0.0[0m
+[0;32mI (3201) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (3211) NET_DIAG: [STA] ip=0.0.0.0 gw=0.0.0.0 mask=0.0.0.0 dns=0.0.0.0[0m
+[0;32mI (3221) gpio: GPIO[2]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 [0m
+[0;32mI (3231) ESP32 NAT router: NAT will be enabled after user accepts the captive portal[0m
+[0;32mI (3241) ESP32 NAT router: Starting config web server[0m
+[0;32mI (3241) DNS_SERVER: DNS server listening on port 53[0m
+[0;33mW (3251) CAPTIVE_PORTAL: DEV_RESET_QUOTA_ON_BOOT is enabled; clearing stored quota state[0m
+[0;32mI (3271) SUPABASE: Supabase client initialized for https://pzkatqdyxexkevyccjzm.supabase.co using sb_* secret key[0m
+[0;32mI (3271) CAPTIVE_PORTAL: Supabase deferred update task started[0m
+[0;32mI (3281) CAPTIVE_PORTAL: Supabase heartbeat task started[0m
+[0;32mI (3291) CAPTIVE_PORTAL: Registered HTTP handler GET /api/status[0m
+[0;32mI (3291) CAPTIVE_PORTAL: Registered HTTP handler GET /[0m
+[0;32mI (3301) CAPTIVE_PORTAL: Registered HTTP handler GET /confirm[0m
+[0;32mI (3301) CAPTIVE_PORTAL: Registered HTTP handler GET /config[0m
+[0;32mI (3311) CAPTIVE_PORTAL: Registered HTTP handler POST /config[0m
+[0;32mI (3321) CAPTIVE_PORTAL: Registered HTTP handler GET /generate_204[0m
+[0;32mI (3321) CAPTIVE_PORTAL: Registered HTTP handler HEAD /generate_204[0m
+[0;32mI (3331) CAPTIVE_PORTAL: Registered HTTP handler GET /gen_204[0m
+[0;32mI (3341) CAPTIVE_PORTAL: Registered HTTP handler HEAD /gen_204[0m
+[0;32mI (3341) CAPTIVE_PORTAL: Registered HTTP handler GET /connectivity-check.html[0m
+[0;32mI (3351) CAPTIVE_PORTAL: Registered HTTP handler HEAD /connectivity-check.html[0m
+[0;32mI (3361) CAPTIVE_PORTAL: Registered HTTP handler GET /hotspot-detect.html[0m
+[0;32mI (3371) CAPTIVE_PORTAL: Registered HTTP handler HEAD /hotspot-detect.html[0m
+[0;32mI (3371) CAPTIVE_PORTAL: Registered HTTP handler GET /library/test/success.html[0m
+[0;32mI (3381) CAPTIVE_PORTAL: Registered HTTP handler GET /connecttest.txt[0m
+[0;32mI (3391) CAPTIVE_PORTAL: Registered HTTP handler GET /ncsi.txt[0m
+[0;32mI (3391) CAPTIVE_PORTAL: Registered HTTP handler GET /mobile/status.php[0m
+[0;32mI (3401) CAPTIVE_PORTAL: Registered HTTP handler GET /success.txt[0m
+[0;32mI (3411) CAPTIVE_PORTAL: Registered HTTP handler GET /redirect[0m
+[0;32mI (3411) CAPTIVE_PORTAL: Registered HTTP handler GET /fwlink[0m
+[0;32mI (3421) CAPTIVE_PORTAL: Registered HTTP handler GET /cea.png[0m
+[0;32mI (3431) CAPTIVE_PORTAL: Registered HTTP handler GET /dashboard.png[0m
+[0;32mI (3431) CAPTIVE_PORTAL: Registered HTTP handler GET /dashboard-ui.png[0m
+[0;32mI (3441) admin_ports: registered handler /ports[0m
+[0;32mI (3451) admin_ports: registered handler /api/ports[0m
+[0;32mI (3451) admin_ports: registered handler /api/battery[0m
+[0;32mI (3461) admin_ports: admin /ports handlers registered[0m
+[0;32mI (3461) CAPTIVE_PORTAL: Registered HTTP handler GET /*[0m
+[0;32mI (3471) CAPTIVE_PORTAL: Registered HTTP handler HEAD /*[0m
+
+ESP32 NAT ROUTER
+Type 'help' to get the list of commands.
+Use UP/DOWN arrows to navigate through command history.
+Press TAB when typing command name to auto-complete.
+[5n[6n [6n [0;32mesp32> [0m[6n I (4121) wifi:state: auth -> init (200)
+I (4121) wifi:new:<4,0>, old:<4,1>, ap:<4,1>, sta:<4,1>, prof:1
+[0;32mI (4121) ESP32 NAT router: disconnected - retry to connect to the AP[0m
+[0;32mI (4141) NET_DIAG: [SNAPSHOT:sta_disconnected] uplink=0 portal=0 napt=0 napt_err=ESP_OK stations=0 ap_ip=192.168.4.1 sta_ip=0.0.0.0[0m
+[0;32mI (4151) NET_DIAG: [PROBE:boot] starting active network probes[0m
+[0;32mI (4151) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (4151) NET_DIAG: [SNAPSHOT:boot] uplink=0 portal=0 napt=0 napt_err=ESP_OK stations=0 ap_ip=192.168.4.1 sta_ip=0.0.0.0[0m
+[0;32mI (4171) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (4161) NET_DIAG: [STA] ip=0.0.0.0 gw=0.0.0.0 mask=0.0.0.0 dns=0.0.0.0[0m
+[0;32mI (4191) ESP32 NAT router: retry to connect to the AP[0m
+[0;32mI (4191) NET_DIAG: [STA] ip=0.0.0.0 gw=0.0.0.0 mask=0.0.0.0 dns=0.0.0.0[0m
+[0;32mI (7021) ESP32 NAT router: disconnected - retry to connect to the AP[0m
+[0;32mI (7031) NET_DIAG: [SNAPSHOT:sta_disconnected] uplink=0 portal=0 napt=0 napt_err=ESP_OK stations=0 ap_ip=192.168.4.1 sta_ip=0.0.0.0[0m
+[0;32mI (7041) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (7051) NET_DIAG: [STA] ip=0.0.0.0 gw=0.0.0.0 mask=0.0.0.0 dns=0.0.0.0[0m
+[0;32mI (7051) ESP32 NAT router: retry to connect to the AP[0m
+I (7061) wifi:new:<4,1>, old:<4,0>, ap:<4,1>, sta:<4,1>, prof:1
+I (7071) wifi:state: init -> auth (b0)
+I (8071) wifi:state: auth -> init (200)
+I (8071) wifi:new:<4,0>, old:<4,1>, ap:<4,1>, sta:<4,1>, prof:1
+[0;32mI (8071) ESP32 NAT router: disconnected - retry to connect to the AP[0m
+[0;32mI (8081) NET_DIAG: [SNAPSHOT:sta_disconnected] uplink=0 portal=0 napt=0 napt_err=ESP_OK stations=0 ap_ip=192.168.4.1 sta_ip=0.0.0.0[0m
+[0;32mI (8101) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (8101) NET_DIAG: [STA] ip=0.0.0.0 gw=0.0.0.0 mask=0.0.0.0 dns=0.0.0.0[0m
+[0;32mI (8111) ESP32 NAT router: retry to connect to the AP[0m
+[0;32mI (10941) ESP32 NAT router: disconnected - retry to connect to the AP[0m
+[0;32mI (10951) NET_DIAG: [SNAPSHOT:sta_disconnected] uplink=0 portal=0 napt=0 napt_err=ESP_OK stations=0 ap_ip=192.168.4.1 sta_ip=0.0.0.0[0m
+[0;32mI (10961) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (10971) NET_DIAG: [STA] ip=0.0.0.0 gw=0.0.0.0 mask=0.0.0.0 dns=0.0.0.0[0m
+[0;32mI (10971) ESP32 NAT router: retry to connect to the AP[0m
+I (10981) wifi:new:<4,1>, old:<4,0>, ap:<4,1>, sta:<4,1>, prof:1
+I (10991) wifi:state: init -> auth (b0)
+I (11991) wifi:state: auth -> init (200)
+I (11991) wifi:new:<4,0>, old:<4,1>, ap:<4,1>, sta:<4,1>, prof:1
+[0;32mI (11991) ESP32 NAT router: disconnected - retry to connect to the AP[0m
+[0;32mI (12001) NET_DIAG: [SNAPSHOT:sta_disconnected] uplink=0 portal=0 napt=0 napt_err=ESP_OK stations=0 ap_ip=192.168.4.1 sta_ip=0.0.0.0[0m
+[0;32mI (12021) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (12021) NET_DIAG: [STA] ip=0.0.0.0 gw=0.0.0.0 mask=0.0.0.0 dns=0.0.0.0[0m
+[0;32mI (12031) ESP32 NAT router: retry to connect to the AP[0m
+[0;32mI (14871) ESP32 NAT router: disconnected - retry to connect to the AP[0m
+[0;32mI (14871) NET_DIAG: [SNAPSHOT:sta_disconnected] uplink=0 portal=0 napt=0 napt_err=ESP_OK stations=0 ap_ip=192.168.4.1 sta_ip=0.0.0.0[0m
+[0;32mI (14881) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (14891) NET_DIAG: [STA] ip=0.0.0.0 gw=0.0.0.0 mask=0.0.0.0 dns=0.0.0.0[0m
+[0;32mI (14891) ESP32 NAT router: retry to connect to the AP[0m
+I (14901) wifi:new:<4,1>, old:<4,0>, ap:<4,1>, sta:<4,1>, prof:1
+I (14911) wifi:state: init -> auth (b0)
+I (14921) wifi:state: auth -> assoc (0)
+I (14941) wifi:state: assoc -> run (10)
+I (14951) wifi:connected with GangosoKingdom, aid = 1, channel 4, 40U, bssid = 26:46:e4:a0:5f:f4
+I (14961) wifi:security: WPA2-PSK, phy: bgn, rssi: -72
+I (14971) wifi:pm start, type: 1
+
+I (14971) wifi:AP's beacon interval = 102400 us, DTIM period = 1
+I (15991) wifi:<ba-add>idx:0 (ifx:0, 26:46:e4:a0:5f:f4), tid:0, ssn:1, winSize:64
+[0;32mI (17981) esp_netif_handlers: sta ip: 192.168.1.51, mask: 255.255.255.0, gw: 192.168.1.1[0m
+[0;32mI (17981) ESP32 NAT router: got ip:192.168.1.51[0m
+[0;32mI (17991) ESP32 NAT router: upstream dns:192.168.1.1[0m
+[0;32mI (17991) ESP32 NAT router: SNTP time sync started[0m
+[0;32mI (17991) NET_DIAG: [SNAPSHOT:sta_got_ip] uplink=1 portal=0 napt=0 napt_err=ESP_OK stations=0 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (18001) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (18021) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+I (25711) wifi:new:<4,1>, old:<4,1>, ap:<4,1>, sta:<4,1>, prof:1
+I (25711) wifi:station: 28:d0:43:12:34:3d join, AID=1, bgn, 40U
+[0;32mI (25711) ESP32 NAT router: 1. station connected[0m
+[0;32mI (25721) CAPTIVE_PORTAL: AP client connected with a fresh daily quota; requiring captive flow[0m
+[0;32mI (25731) NET_DIAG: [SNAPSHOT:ap_client_connected] uplink=1 portal=0 napt=0 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (25741) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (25751) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+I (26071) wifi:<ba-add>idx:2 (ifx:1, 28:d0:43:12:34:3d), tid:0, ssn:18, winSize:64
+[0;32mI (26181) SOLAR_LWIP_HOOK: Advertising DHCP captive portal option 114: http://192.168.4.1/[0m
+[0;32mI (26181) esp_netif_lwip: DHCP server assigned IP to a client, IP is: 192.168.4.2[0m
+[0;32mI (27001) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=1 name=geo.prod.do.dsp.mp.microsoft.com[0m
+[0;32mI (27011) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=28 name=geo.prod.do.dsp.mp.microsoft.com[0m
+[0;32mI (27251) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=1 name=www.msftconnecttest.com[0m
+[0;32mI (27271) CAPTIVE_PORTAL: Captive redirect for /connecttest.txt from 192.168.4.2[0m
+[0;32mI (27621) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=1 name=www.msftconnecttest.com[0m
+[0;32mI (27641) CAPTIVE_PORTAL: Captive redirect for /connecttest.txt from 192.168.4.2[0m
+[0;32mI (28131) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=1 name=mtalk.google.com[0m
+[0;32mI (28161) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=1 name=api.spotify.com[0m
+[0;32mI (28171) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=65 name=api.spotify.com[0m
+[0;32mI (28611) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=1 name=southeastasia-1.in.applicationinsights.azure.com[0m
+[0;32mI (28731) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=1 name=c-hkg09-a3c833b2.discord.media[0m
+[0;32mI (28741) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=65 name=_2083._https.c-hkg09-a3c833b2.discord.media[0m
+[0;32mI (28831) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=1 name=gateway.discord.gg[0m
+[0;32mI (28831) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=65 name=gateway.discord.gg[0m
+[0;32mI (29231) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=1 name=kv601.prod.do.dsp.mp.microsoft.com[0m
+[0;32mI (29911) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=28 name=geo.prod.do.dsp.mp.microsoft.com[0m
+[0;32mI (31221) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=65 name=www.msftconnecttest.com[0m
+[0;32mI (31221) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=1 name=www.msftconnecttest.com[0m
+[0;32mI (31231) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=1 name=mtalk.google.com[0m
+[0;32mI (31301) CAPTIVE_PORTAL: Captive redirect for /redirect from 192.168.4.2[0m
+[0;32mI (32231) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=1 name=dealer.spotify.com[0m
+[0;32mI (32241) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=65 name=dealer.spotify.com[0m
+[0;32mI (34041) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=65 name=nexus-websocket-a.intercom.io[0m
+[0;32mI (34051) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=1 name=nexus-websocket-a.intercom.io[0m
+[0;32mI (34921) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=1 name=c-hkg09-a3c833b2.discord.media[0m
+[0;32mI (34921) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=65 name=_2083._https.c-hkg09-a3c833b2.discord.media[0m
+[0;32mI (36591) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=1 name=api.spotify.com[0m
+[0;32mI (36601) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=65 name=api.spotify.com[0m
+[0;32mI (37051) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=65 name=api.anthropic.com[0m
+[0;32mI (37061) DNS_SERVER: Captive DNS response for unauthenticated client 192.168.4.2 qtype=1 name=api.anthropic.com[0m
+[0;32mI (37791) NET_DIAG: [SNAPSHOT:confirm_handler] uplink=1 portal=0 napt=0 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (37801) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (37801) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;33mW (37821) esp_netif_lwip: napt disabled on esp_netif:0x3ffc1790[0m
+[0;32mI (37821) CAPTIVE_PORTAL: NAPT enabled on SoftAP netif[0m
+[0;32mI (37831) NET_DIAG: [SNAPSHOT:napt_enabled] uplink=1 portal=0 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (37841) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (37851) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (37851) NET_DIAG: [SNAPSHOT:session_started] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (37871) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (37881) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (37891) CAPTIVE_PORTAL: Starting session for IP: 33859776[0m
+[0;32mI (37891) NET_DIAG: [SNAPSHOT:session_started] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (37901) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (37921) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (37931) CAPTIVE_PORTAL: Syncing portal session to Supabase[0m
+[0;32mI (37931) SUPABASE: Upserting session to Supabase: token=6ff7c97be2721c13f584fd426d860eff device_hash=7f59ae8d2c0eaab6a5a9b4f00951fa3d6eb89b5123bdc3feb99d61a294de8783 status=active remaining=3599 ap_connected=true[0m
+[0;32mI (37951) SUPABASE: Supabase target table: public.sessions[0m
+[0;32mI (38131) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=gateway.discord.gg[0m
+[0;32mI (38131) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (38141) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53902[0m
+[0;32mI (38161) DNS_SERVER: Received 116-byte DNS response from 192.168.1.1[0m
+[0;32mI (38171) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=gateway.discord.gg[0m
+[0;32mI (38171) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (38181) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53903[0m
+[0;32mI (38201) DNS_SERVER: Received 82-byte DNS response from 192.168.1.1[0m
+[0;32mI (39421) esp-x509-crt-bundle: Certificate validated[0m
+[0;32mI (41081) SUPABASE: POST /rest/v1/sessions?on_conflict=token -> HTTP 201[0m
+[0;32mI (41261) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=solarconnect.live[0m
+[0;32mI (41261) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (41271) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53904[0m
+[0;32mI (41321) DNS_SERVER: Received 109-byte DNS response from 192.168.1.1[0m
+[0;32mI (41321) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=solarconnect.live[0m
+[0;32mI (41321) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (41341) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53905[0m
+[0;32mI (41351) DNS_SERVER: Received 67-byte DNS response from 192.168.1.1[0m
+[0;32mI (41721) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=mobile.events.data.microsoft.com[0m
+[0;32mI (41721) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (41741) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53906[0m
+[0;32mI (41751) DNS_SERVER: Received 180-byte DNS response from 192.168.1.1[0m
+[0;32mI (52391) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=discord.com[0m
+[0;32mI (52391) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (52401) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (52401) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (52411) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (52421) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (52431) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (52431) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (52441) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (52451) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (52461) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (52471) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=discord.com[0m
+[0;32mI (52481) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (52481) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (52501) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (52501) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (52511) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (52511) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (52521) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (52521) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (52541) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (52551) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (53601) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=discord.com[0m
+[0;32mI (53601) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (53611) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (53621) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (53631) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (53631) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (53641) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (53641) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (53651) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (53661) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (53681) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (53731) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=geover.prod.do.dsp.mp.microsoft.com[0m
+[0;32mI (53741) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (53751) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (53751) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (53761) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (53761) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (53771) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (53781) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (53791) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (53801) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (53811) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (54981) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=geover.prod.do.dsp.mp.microsoft.com[0m
+[0;32mI (54991) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (55001) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (55001) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (55011) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (55011) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (55021) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (55031) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (55041) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (55051) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (55061) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (55521) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=discord.com[0m
+[0;32mI (55521) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (55531) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (55531) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (55541) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (55551) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (55561) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (55561) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (55571) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (55581) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (55591) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (55621) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=discord.com[0m
+[0;32mI (55621) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (55631) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (55631) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (55641) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (55641) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (55651) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (55661) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (55671) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (55681) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (55691) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (56551) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=sadownload.mcafee.com[0m
+[0;32mI (56551) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (56571) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (56571) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (56581) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (56581) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (56591) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (56591) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (56601) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (56621) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (56631) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (56751) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=discord.com[0m
+[0;32mI (56751) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (56771) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (56771) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (56781) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (56781) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (56791) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (56791) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (56801) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (56821) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (56831) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (56841) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=discord.com[0m
+[0;32mI (56841) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (56851) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (56851) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (56871) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (56871) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (56881) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (56891) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (56901) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (56911) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (56911) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (57771) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=www.msftconnecttest.com[0m
+[0;32mI (57771) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (57781) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (57791) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (57801) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (57801) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (57811) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (57811) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (57821) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (57841) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (57851) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (58911) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=discord.com[0m
+[0;32mI (58911) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (58921) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (58921) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (58941) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (58941) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (58951) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (58951) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (58961) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (58971) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (58991) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (58991) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=discord.com[0m
+[0;32mI (59001) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (59001) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (59021) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (59021) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (59031) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (59031) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (59041) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (59051) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (59061) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (59071) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (59871) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=geover.prod.do.dsp.mp.microsoft.com[0m
+[0;32mI (59871) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (59881) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (59881) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (59891) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (59891) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (59911) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (59911) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (59921) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (59931) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (59941) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (60091) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=discord.com[0m
+[0;32mI (60091) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (60101) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (60111) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (60121) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (60121) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (60131) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (60131) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (60141) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (60151) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (60171) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (60691) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=claude.ai[0m
+[0;32mI (60691) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (60701) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (60701) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (60721) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (60721) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (60731) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (60731) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (60741) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (60751) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (60771) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (60781) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=claude.ai[0m
+[0;32mI (60781) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (60791) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (60791) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (60811) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (60811) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (60821) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (60821) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (60831) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (60841) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (60861) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (60861) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=discord.com[0m
+[0;32mI (60871) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (60871) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (60881) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (60891) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (60901) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (60911) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (60911) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (60921) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (60931) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (60951) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (60951) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=discord.com[0m
+[0;32mI (60961) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (60961) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (60971) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (60981) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (60991) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (60991) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (61001) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (61011) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (61021) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (61031) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (61041) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=www.msftconnecttest.com[0m
+[0;32mI (61051) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (61051) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (61061) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (61071) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (61081) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (61081) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (61091) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (61091) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (61101) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (61121) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (61131) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=ipv6.msftconnecttest.com[0m
+[0;32mI (61131) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (61141) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (61151) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (61161) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (61161) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (61171) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (61181) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (61181) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (61191) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (61211) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (61891) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=claude.ai[0m
+[0;32mI (61891) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (61901) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (61901) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (61911) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (61911) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (61931) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (61931) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (61941) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (61951) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (61971) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (62991) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=discord.com[0m
+[0;32mI (63001) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (63011) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (63011) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (63021) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (63021) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (63031) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (63031) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (63051) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (63061) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (63071) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (63081) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=discord.com[0m
+[0;32mI (63091) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (63091) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (63101) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (63101) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (63111) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (63121) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (63131) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (63131) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (63141) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (63151) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (63281) SUPABASE: Upserting session to Supabase: token=6ff7c97be2721c13f584fd426d860eff device_hash=7f59ae8d2c0eaab6a5a9b4f00951fa3d6eb89b5123bdc3feb99d61a294de8783 status=active remaining=3574 ap_connected=true[0m
+[0;32mI (63301) SUPABASE: Supabase target table: public.sessions[0m
+[0;31mE (63301) esp-tls: Failed to create socket (family 2 socktype 1 protocol 0)[0m
+[0;31mE (63311) esp-tls: Failed to open new connection[0m
+[0;31mE (63311) transport_base: Failed to open a new connection[0m
+[0;31mE (63321) HTTP_CLIENT: Connection failed, sock < 0[0m
+[0;31mE (63331) SUPABASE: HTTP request to /rest/v1/sessions?on_conflict=token failed: ESP_ERR_HTTP_CONNECT[0m
+[0;33mW (63341) CAPTIVE_PORTAL: Heartbeat failed for a session: ESP_ERR_HTTP_CONNECT[0m
+[0;32mI (63431) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=ab-merchandise.opera-api.com[0m
+[0;32mI (63431) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (63441) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (63441) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (63461) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (63461) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (63471) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (63471) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (63481) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (63491) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (63511) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (63521) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=ab-merchandise.opera-api.com[0m
+[0;32mI (63521) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (63531) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (63541) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (63551) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (63551) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (63561) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (63561) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (63571) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (63591) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (63601) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (63831) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=claude.ai[0m
+[0;32mI (63841) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (63851) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (63851) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (63861) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (63861) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (63871) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (63881) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (63891) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (63901) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (63911) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (63991) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=claude.ai[0m
+[0;32mI (63991) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (64011) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (64011) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (64021) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (64021) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (64031) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (64031) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (64041) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (64061) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (64071) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (64081) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=claude.ai[0m
+[0;32mI (64081) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (64091) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (64091) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (64101) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (64101) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (64121) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (64131) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (64131) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (64141) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (64151) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (64171) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=claude.ai[0m
+[0;32mI (64171) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;33mW (64181) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (64181) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (64191) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (64201) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (64211) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (64211) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (64221) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (64231) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (64241) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;33mW (64451) NET_DIAG: [PROBE:google-dns:53] tcp://8.8.8.8:53 failed errno=113[0m
+[0;32mI (64481) NET_DIAG: [PROBE:cloudflare:80] tcp://1.1.1.1:80 ok[0m
+[0;32mI (64651) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=ab-merchandise.opera-api.com[0m
+[0;32mI (64651) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (64661) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53907[0m
+[0;32mI (64681) DNS_SERVER: Received 188-byte DNS response from 192.168.1.1[0m
+[0;32mI (65201) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=claude.ai[0m
+[0;32mI (65201) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (65211) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53908[0m
+[0;32mI (65221) DNS_SERVER: Received 80-byte DNS response from 192.168.1.1[0m
+[0;32mI (65271) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=claude.ai[0m
+[0;32mI (65271) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (65291) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53909[0m
+[0;32mI (65301) DNS_SERVER: Received 43-byte DNS response from 192.168.1.1[0m
+[0;32mI (65521) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=discord.com[0m
+[0;32mI (65521) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (65541) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53910[0m
+[0;32mI (65561) DNS_SERVER: Received 109-byte DNS response from 192.168.1.1[0m
+[0;32mI (65561) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=discord.com[0m
+[0;32mI (65571) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (65581) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53911[0m
+[0;32mI (65601) DNS_SERVER: Received 78-byte DNS response from 192.168.1.1[0m
+[0;32mI (66001) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=geover.prod.do.dsp.mp.microsoft.com[0m
+[0;32mI (66011) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (66021) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53912[0m
+[0;32mI (66031) DNS_SERVER: Received 164-byte DNS response from 192.168.1.1[0m
+[0;32mI (69171) CAPTIVE_PORTAL: Captive probe success for /redirect from 192.168.4.2[0m
+[0;33mW (69361) httpd_txrx: httpd_resp_send_err: 404 Not Found - Nothing matches the given URI[0m
+[0;32mI (73871) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=drive.google.com[0m
+[0;32mI (73881) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (73891) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53913[0m
+[0;32mI (73901) DNS_SERVER: Received 84-byte DNS response from 192.168.1.1[0m
+[0;32mI (73911) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=drive.google.com[0m
+[0;32mI (73921) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (73921) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53914[0m
+[0;32mI (73951) DNS_SERVER: Received 50-byte DNS response from 192.168.1.1[0m
+[0;32mI (74191) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=www.facebook.com[0m
+[0;32mI (74191) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (74201) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53915[0m
+[0;32mI (74211) DNS_SERVER: Received 150-byte DNS response from 192.168.1.1[0m
+[0;32mI (74221) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=www.facebook.com[0m
+[0;32mI (74221) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (74231) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53916[0m
+[0;32mI (74251) DNS_SERVER: Received 79-byte DNS response from 192.168.1.1[0m
+[0;32mI (74811) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=scontent.xx.fbcdn.net[0m
+[0;32mI (74811) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (74821) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53917[0m
+[0;32mI (74841) DNS_SERVER: Received 120-byte DNS response from 192.168.1.1[0m
+[0;32mI (74851) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=scontent.xx.fbcdn.net[0m
+[0;32mI (74861) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (74861) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53918[0m
+[0;32mI (74901) DNS_SERVER: Received 55-byte DNS response from 192.168.1.1[0m
+[0;32mI (74901) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=video.xx.fbcdn.net[0m
+[0;32mI (74911) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (74921) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53919[0m
+[0;32mI (74931) DNS_SERVER: Received 114-byte DNS response from 192.168.1.1[0m
+[0;32mI (74931) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=video.xx.fbcdn.net[0m
+[0;32mI (74951) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (74951) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53920[0m
+[0;32mI (74971) DNS_SERVER: Received 52-byte DNS response from 192.168.1.1[0m
+[0;32mI (75451) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=www.fbsbx.com[0m
+[0;32mI (75451) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (75461) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53921[0m
+[0;32mI (75481) DNS_SERVER: Received 146-byte DNS response from 192.168.1.1[0m
+[0;32mI (75491) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=www.fbsbx.com[0m
+[0;32mI (75491) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (75501) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53922[0m
+[0;32mI (75521) DNS_SERVER: Received 80-byte DNS response from 192.168.1.1[0m
+[0;32mI (75551) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=edge-chat.facebook.com[0m
+[0;32mI (75561) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (75571) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53923[0m
+[0;33mW (75571) DNS_SERVER: Failed to send DNS query upstream to 192.168.1.1: errno=12[0m
+[0;32mI (75591) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;32mI (75591) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53924[0m
+[0;33mW (75601) DNS_SERVER: Failed to send DNS query upstream to 8.8.8.8: errno=12[0m
+[0;32mI (75601) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;32mI (75611) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53925[0m
+[0;33mW (75621) DNS_SERVER: Failed to send DNS query upstream to 1.1.1.1: errno=12[0m
+[0;33mW (75631) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (75631) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (75641) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (75661) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (75671) NET_DIAG: [PROBE:dns_forward_failed] starting active network probes[0m
+[0;32mI (75671) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (75671) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=edge-chat.facebook.com[0m
+[0;32mI (75681) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (75691) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (75711) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53926[0m
+[0;32mI (75711) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;33mW (75721) NET_DIAG: [PROBE:gateway:53] socket create failed errno=23[0m
+[0;33mW (75731) NET_DIAG: [PROBE:sta-dns:53] socket create failed errno=23[0m
+[0;33mW (75741) NET_DIAG: [PROBE:google-dns:53] socket create failed errno=23[0m
+[0;33mW (75751) NET_DIAG: [PROBE:cloudflare:80] socket create failed errno=23[0m
+[0;32mI (75821) DNS_SERVER: Received 80-byte DNS response from 192.168.1.1[0m
+[0;32mI (75831) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=scontent.fmnl13-4.fna.fbcdn.net[0m
+[0;32mI (75831) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (75851) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53927[0m
+[0;32mI (76041) DNS_SERVER: Received 74-byte DNS response from 192.168.1.1[0m
+[0;32mI (76041) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=scontent.fmnl13-4.fna.fbcdn.net[0m
+[0;32mI (76051) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (76061) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53928[0m
+[0;32mI (76111) DNS_SERVER: Received 65-byte DNS response from 192.168.1.1[0m
+[0;32mI (76111) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=web-chat-e2ee.facebook.com[0m
+[0;32mI (76121) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (76131) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53929[0m
+[0;32mI (76231) DNS_SERVER: Received 194-byte DNS response from 192.168.1.1[0m
+[0;32mI (76241) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=web-chat-e2ee.facebook.com[0m
+[0;32mI (76241) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (76261) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53930[0m
+[0;32mI (76331) DNS_SERVER: Received 128-byte DNS response from 192.168.1.1[0m
+[0;32mI (76511) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=scontent.fmnl13-3.fna.fbcdn.net[0m
+[0;32mI (76521) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (76531) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53931[0m
+[0;32mI (76541) DNS_SERVER: Received 74-byte DNS response from 192.168.1.1[0m
+[0;32mI (76551) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=scontent.fmnl13-3.fna.fbcdn.net[0m
+[0;32mI (76561) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (76571) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53932[0m
+[0;33mW (76571) DNS_SERVER: Failed to send DNS query upstream to 192.168.1.1: errno=12[0m
+[0;32mI (76581) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;32mI (76581) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53933[0m
+[0;33mW (76601) DNS_SERVER: Failed to send DNS query upstream to 8.8.8.8: errno=12[0m
+[0;32mI (76611) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;32mI (76611) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53934[0m
+[0;33mW (76621) DNS_SERVER: Failed to send DNS query upstream to 1.1.1.1: errno=12[0m
+[0;33mW (76631) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (76631) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (76651) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (76661) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (76661) NET_DIAG: [PROBE:dns_forward_failed] starting active network probes[0m
+[0;32mI (76661) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=gateway.facebook.com[0m
+[0;32mI (76681) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (76691) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (76691) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (76711) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53935[0m
+[0;32mI (76711) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (76731) DNS_SERVER: Received 106-byte DNS response from 192.168.1.1[0m
+[0;32mI (76741) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=gateway.facebook.com[0m
+[0;32mI (76751) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (76751) NET_DIAG: [PROBE:gateway:53] tcp://192.168.1.1:53 ok[0m
+[0;33mW (76751) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (76771) DNS_SERVER: Retrying DNS query via fallback 8.8.8.8[0m
+[0;33mW (76771) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;32mI (76781) NET_DIAG: [PROBE:sta-dns:53] tcp://192.168.1.1:53 ok[0m
+[0;32mI (76781) DNS_SERVER: Retrying DNS query via fallback 1.1.1.1[0m
+[0;33mW (76801) DNS_SERVER: Failed to create upstream DNS socket: errno=23[0m
+[0;33mW (76801) DNS_SERVER: All upstream DNS attempts failed for client 192.168.4.2[0m
+[0;32mI (76811) NET_DIAG: [SNAPSHOT:dns_forward_failed] uplink=1 portal=1 napt=1 napt_err=ESP_OK stations=1 ap_ip=192.168.4.1 sta_ip=192.168.1.51[0m
+[0;32mI (76821) NET_DIAG: [AP] ip=192.168.4.1 gw=192.168.4.1 mask=255.255.255.0 dns=192.168.4.1[0m
+[0;32mI (76821) NET_DIAG: [PROBE:google-dns:53] tcp://8.8.8.8:53 ok[0m
+[0;32mI (76831) NET_DIAG: [STA] ip=192.168.1.51 gw=192.168.1.1 mask=255.255.255.0 dns=192.168.1.1[0m
+[0;32mI (76871) NET_DIAG: [PROBE:cloudflare:80] tcp://1.1.1.1:80 ok[0m
+[0;32mI (76881) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=65 name=static.xx.fbcdn.net[0m
+[0;32mI (76891) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (76901) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53936[0m
+[0;32mI (77061) DNS_SERVER: Received 141-byte DNS response from 192.168.1.1[0m
+[0;32mI (77061) DNS_SERVER: Authenticated DNS query from 192.168.4.2 qtype=1 name=static.xx.fbcdn.net[0m
+[0;32mI (77071) DNS_SERVER: Forwarding DNS query to upstream 192.168.1.1[0m
+[0;32mI (77081) DNS_SERVER: Upstream DNS socket local endpoint 192.168.1.51:53937[0m
+[0;32mI (77101) DNS_SERVER: Received 76-byte DNS response from 192.168.1.1[0m
+[0;32mI 

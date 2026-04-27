@@ -939,12 +939,32 @@ static int get_global_remaining_seconds(void)
 
 uint32_t get_client_ip(httpd_req_t *req) {
     int sockfd = httpd_req_to_sockfd(req);
-    struct sockaddr_in addr;
+    struct sockaddr_storage addr;
     socklen_t addr_len = sizeof(addr);
-    if (getpeername(sockfd, (struct sockaddr *)&addr, &addr_len) == 0) {
-        return addr.sin_addr.s_addr;
+    if (getpeername(sockfd, (struct sockaddr *)&addr, &addr_len) != 0) {
+        ESP_LOGW(TAG_WEB, "Failed to get client IP for sockfd %d, errno=%d", sockfd, errno);
+        return 0;
     }
-    ESP_LOGW(TAG_WEB, "Failed to get client IP for sockfd %d, errno=%d", sockfd, errno);
+    if (addr.ss_family == AF_INET) {
+        return ((struct sockaddr_in *)&addr)->sin_addr.s_addr;
+    }
+    if (addr.ss_family == AF_INET6) {
+        // ESP-IDF httpd binds an IPv6 socket; IPv4 clients arrive as IPv4-mapped
+        // IPv6 addresses (::ffff:a.b.c.d). Without this branch, casting to
+        // sockaddr_in returns garbage and every HTTP request looks like 0.0.0.0,
+        // which then falls through to the global-session check and breaks
+        // per-client captive portal auto-detection.
+        struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)&addr;
+        static const uint8_t v4mapped_prefix[12] = {0,0,0,0,0,0,0,0,0,0,0xff,0xff};
+        if (memcmp(addr6->sin6_addr.s6_addr, v4mapped_prefix, 12) == 0) {
+            uint32_t v4;
+            memcpy(&v4, &addr6->sin6_addr.s6_addr[12], sizeof(v4));
+            return v4;
+        }
+        ESP_LOGW(TAG_WEB, "Peer is pure IPv6 on sockfd %d; cannot map to IPv4 session", sockfd);
+        return 0;
+    }
+    ESP_LOGW(TAG_WEB, "Unrecognized peer addr family %d on sockfd %d", addr.ss_family, sockfd);
     return 0;
 }
 
@@ -975,12 +995,31 @@ int get_remaining_seconds(uint32_t ip) {
 
                 sessions[session_index].ip_addr = ip;
                 client_acl_admit(ip, client_mac);
+                ESP_LOGI(TAG_WEB, "Per-client session matched by MAC for " IPSTR ", %lld sec remaining",
+                         IP2STR((ip4_addr_t *)&ip), (long long)(remaining / 1000000LL));
                 return (int)(remaining / 1000000LL);
             }
         }
+
+        // Per-client gating must stay per-client. We deliberately do NOT fall
+        // through to s_global_session_end_time here: if any device auto-resumed
+        // with partial quota, the global flag is set and would leak "authenticated"
+        // status to every other unadmitted client, breaking captive-portal
+        // auto-detection (DNS would forward, HTTP probes would 204) for new devices.
+        if (s_global_session_end_time > now) {
+            ESP_LOGI(TAG_WEB, "No per-client session for " IPSTR "; global session is set but ignored to keep captive portal per-client",
+                     IP2STR((ip4_addr_t *)&ip));
+        }
+        return -1;
     }
 
-    return get_global_remaining_seconds();
+    // ip == 0: peer lookup failed (or pure-IPv6 peer). Do NOT consult the
+    // global session — that would authenticate every unidentifiable request
+    // and break per-client captive portal detection. Treat as unauthenticated.
+    if (s_global_session_end_time > now) {
+        ESP_LOGI(TAG_WEB, "get_remaining_seconds called with ip=0 while global session set; refusing to authenticate");
+    }
+    return -1;
 }
 
 bool is_client_session_active(uint32_t ip_addr)
