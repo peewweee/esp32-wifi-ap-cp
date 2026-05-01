@@ -1788,6 +1788,39 @@ static esp_err_t catch_all_handler(httpd_req_t *req)
     return send_redirect_to_portal(req);
 }
 
+static const char *http_method_name(httpd_method_t method)
+{
+    switch (method) {
+    case HTTP_GET:
+        return "GET";
+    case HTTP_POST:
+        return "POST";
+    case HTTP_HEAD:
+        return "HEAD";
+    default:
+        return "OTHER";
+    }
+}
+
+static void register_uri_handler_checked(httpd_handle_t server, const httpd_uri_t *uri)
+{
+    esp_err_t err;
+
+    if (server == NULL || uri == NULL) {
+        return;
+    }
+
+    err = httpd_register_uri_handler(server, uri);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG_WEB, "Registered HTTP handler %s %s", http_method_name(uri->method), uri->uri);
+    } else {
+        ESP_LOGE(TAG_WEB, "Failed to register HTTP handler %s %s: %s",
+                 http_method_name(uri->method),
+                 uri->uri,
+                 esp_err_to_name(err));
+    }
+}
+
 static esp_err_t send_quota_page(httpd_req_t *req)
 {
     char response[2048];
@@ -2076,60 +2109,60 @@ httpd_handle_t start_webserver(void)
     if (httpd_start(&server, &config) != ESP_OK) return NULL;
 
     httpd_uri_t api_status_uri = { .uri = "/api/status", .method = HTTP_GET, .handler = api_status_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &api_status_uri);
+    register_uri_handler_checked(server, &api_status_uri);
     httpd_uri_t portal_uri = { .uri = "/", .method = HTTP_GET, .handler = portal_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &portal_uri);
+    register_uri_handler_checked(server, &portal_uri);
     
     httpd_uri_t confirm_uri = { .uri = "/confirm", .method = HTTP_GET, .handler = confirm_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &confirm_uri);
+    register_uri_handler_checked(server, &confirm_uri);
     httpd_uri_t admin_get_uri = { .uri = "/config", .method = HTTP_GET, .handler = admin_config_get_handler, .user_ctx = config_page };
-    httpd_register_uri_handler(server, &admin_get_uri);
+    register_uri_handler_checked(server, &admin_get_uri);
     httpd_uri_t admin_post_uri = { .uri = "/config", .method = HTTP_POST, .handler = admin_config_post_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &admin_post_uri);
+    register_uri_handler_checked(server, &admin_post_uri);
     httpd_uri_t gen_204_uri = { .uri = "/generate_204", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &gen_204_uri);
+    register_uri_handler_checked(server, &gen_204_uri);
     httpd_uri_t gen_204_head_uri = { .uri = "/generate_204", .method = HTTP_HEAD, .handler = redirect_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &gen_204_head_uri);
+    register_uri_handler_checked(server, &gen_204_head_uri);
     httpd_uri_t gen_204_alt_uri = { .uri = "/gen_204", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &gen_204_alt_uri);
+    register_uri_handler_checked(server, &gen_204_alt_uri);
     httpd_uri_t gen_204_alt_head_uri = { .uri = "/gen_204", .method = HTTP_HEAD, .handler = redirect_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &gen_204_alt_head_uri);
+    register_uri_handler_checked(server, &gen_204_alt_head_uri);
     httpd_uri_t connectivity_check_uri = { .uri = "/connectivity-check.html", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &connectivity_check_uri);
+    register_uri_handler_checked(server, &connectivity_check_uri);
     httpd_uri_t connectivity_check_head_uri = { .uri = "/connectivity-check.html", .method = HTTP_HEAD, .handler = redirect_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &connectivity_check_head_uri);
+    register_uri_handler_checked(server, &connectivity_check_head_uri);
     httpd_uri_t hotspot_uri = { .uri = "/hotspot-detect.html", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &hotspot_uri);
+    register_uri_handler_checked(server, &hotspot_uri);
     httpd_uri_t hotspot_head_uri = { .uri = "/hotspot-detect.html", .method = HTTP_HEAD, .handler = redirect_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &hotspot_head_uri);
+    register_uri_handler_checked(server, &hotspot_head_uri);
     httpd_uri_t apple_success_uri = { .uri = "/library/test/success.html", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &apple_success_uri);
+    register_uri_handler_checked(server, &apple_success_uri);
     httpd_uri_t windows_connecttest_uri = { .uri = "/connecttest.txt", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &windows_connecttest_uri);
+    register_uri_handler_checked(server, &windows_connecttest_uri);
     httpd_uri_t windows_ncsi_uri = { .uri = "/ncsi.txt", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &windows_ncsi_uri);
+    register_uri_handler_checked(server, &windows_ncsi_uri);
     httpd_uri_t android_mobile_status_uri = { .uri = "/mobile/status.php", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &android_mobile_status_uri);
+    register_uri_handler_checked(server, &android_mobile_status_uri);
     httpd_uri_t success_txt_uri = { .uri = "/success.txt", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &success_txt_uri);
+    register_uri_handler_checked(server, &success_txt_uri);
     httpd_uri_t windows_redirect_uri = { .uri = "/redirect", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &windows_redirect_uri);
+    register_uri_handler_checked(server, &windows_redirect_uri);
     httpd_uri_t microsoft_fwlink_uri = { .uri = "/fwlink", .method = HTTP_GET, .handler = redirect_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &microsoft_fwlink_uri);
+    register_uri_handler_checked(server, &microsoft_fwlink_uri);
     httpd_uri_t cea_uri = { .uri = "/cea.png", .method = HTTP_GET, .handler = img_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &cea_uri);
+    register_uri_handler_checked(server, &cea_uri);
     httpd_uri_t phone_uri = { .uri = "/dashboard.png", .method = HTTP_GET, .handler = img_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &phone_uri);
+    register_uri_handler_checked(server, &phone_uri);
     httpd_uri_t dash_uri = { .uri = "/dashboard-ui.png", .method = HTTP_GET, .handler = img_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &dash_uri);
+    register_uri_handler_checked(server, &dash_uri);
 
     /* Register /ports test admin page + its APIs before the catch-all. */
     admin_ports_register_handlers(server);
 
     httpd_uri_t catch_all_uri = { .uri = "/*", .method = HTTP_GET, .handler = catch_all_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &catch_all_uri);
+    register_uri_handler_checked(server, &catch_all_uri);
     httpd_uri_t catch_all_head_uri = { .uri = "/*", .method = HTTP_HEAD, .handler = catch_all_handler, .user_ctx = NULL };
-    httpd_register_uri_handler(server, &catch_all_head_uri);
+    register_uri_handler_checked(server, &catch_all_head_uri);
 
     return server;
 }

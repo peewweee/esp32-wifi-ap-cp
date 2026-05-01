@@ -43,6 +43,7 @@
 #include "dns_server.h"
 #include "net_diag.h"
 #include "port_sensors.h"
+#include "rfid_reader.h"
 
 #if !IP_NAPT
 #error "IP_NAPT must be defined"
@@ -656,6 +657,11 @@ void app_main(void)
     port_sensor_err = port_sensors_start_supabase_sync();
     if (port_sensor_err != ESP_OK) {
         ESP_LOGW(TAG, "Port sensor Supabase sync start failed: %s", esp_err_to_name(port_sensor_err));
+    }
+
+    esp_err_t rfid_err = rfid_reader_start();
+    if (rfid_err != ESP_OK) {
+        ESP_LOGW(TAG, "RFID reader start failed: %s", esp_err_to_name(rfid_err));
     }
 
     net_diag_start_task();

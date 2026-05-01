@@ -1,14 +1,32 @@
 #include "admin_ports.h"
+#include "port_sensors.h"
 #include "supabase_client.h"
 
 #include "esp_log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 
 static const char *TAG = "admin_ports";
 
 #define STATION_ID "solar-hub-01"
+
+static void register_admin_uri_checked(httpd_handle_t server, const httpd_uri_t *uri)
+{
+    esp_err_t err;
+
+    if (server == NULL || uri == NULL) {
+        return;
+    }
+
+    err = httpd_register_uri_handler(server, uri);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "registered handler %s", uri->uri);
+    } else {
+        ESP_LOGE(TAG, "failed to register handler %s: %s", uri->uri, esp_err_to_name(err));
+    }
+}
 
 /* ------------------------------------------------------------------------
  * HTML test page
@@ -221,6 +239,93 @@ static bool is_known_status(const char *status)
 }
 
 /* ------------------------------------------------------------------------
+ * /port-occupied — live USB-A port occupancy view
+ *
+ * Polls /api/ports/sensors and renders only usb_a_1 (INA219 0x44) and
+ * usb_a_2 (INA219 0x45). The USB-C INA219s (0x40, 0x41) are intentionally
+ * skipped because those chips are faulty on the current PCB rev (their
+ * SCL pins are internally shorted to GND).
+ * ------------------------------------------------------------------------ */
+static const char *PORT_OCCUPIED_HTML =
+    "<!DOCTYPE html><html lang='en'><head>"
+    "<meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>Port Occupancy</title>"
+    "<style>"
+    "*{box-sizing:border-box}"
+    "body{margin:0;padding:24px 16px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
+    "background:#F5F0EB;color:#521B1B;min-height:100vh}"
+    ".wrap{max-width:480px;margin:0 auto}"
+    "h1{font-size:24px;margin:0 0 6px;letter-spacing:-0.01em}"
+    ".sub{color:#6F1D1B;font-size:13px;margin:0 0 22px;opacity:0.75;line-height:1.45}"
+    ".card{background:#fff;border-radius:18px;padding:18px 20px;margin-bottom:14px;"
+    "box-shadow:0 6px 20px rgba(82,27,27,0.08);border:2px solid rgba(82,27,27,0.06);"
+    "transition:border-color 0.2s ease}"
+    ".card.available{border-color:#86efac}"
+    ".card.in-use{border-color:#fca5a5}"
+    ".card.fault,.card.not-ready{border-color:#fbbf24}"
+    ".card h2{margin:0 0 10px;font-size:14px;font-weight:700;color:#521B1B;letter-spacing:0.04em;text-transform:uppercase}"
+    ".badge{display:inline-block;padding:6px 14px;border-radius:999px;font-size:13px;font-weight:700;letter-spacing:0.04em}"
+    ".badge.available{background:#dcfce7;color:#166534}"
+    ".badge.in-use{background:#fee2e2;color:#991b1b}"
+    ".badge.fault,.badge.not-ready{background:#fef3c7;color:#92400e}"
+    ".reading{margin-top:10px;font-size:13px;color:#6F1D1B;opacity:0.85;font-variant-numeric:tabular-nums}"
+    ".reading b{color:#521B1B;opacity:1;font-weight:700}"
+    ".footer{color:#6F1D1B;font-size:12px;opacity:0.6;margin-top:16px;text-align:center}"
+    ".error{color:#991b1b;background:#fee2e2;padding:10px 14px;border-radius:10px;font-size:13px;margin-bottom:14px;display:none}"
+    "</style></head><body>"
+    "<div class='wrap'>"
+    "<h1>USB-A Port Occupancy</h1>"
+    "<p class='sub'>Live readings from the INA219 current sensors. "
+    "Above 50 mA is treated as in use.</p>"
+    "<div id='err' class='error'></div>"
+    "<div class='card not-ready' data-key='usb_a_1'>"
+    "<h2>USB-A 1</h2>"
+    "<span class='badge not-ready'>connecting…</span>"
+    "<div class='reading'>—</div>"
+    "</div>"
+    "<div class='card not-ready' data-key='usb_a_2'>"
+    "<h2>USB-A 2</h2>"
+    "<span class='badge not-ready'>connecting…</span>"
+    "<div class='reading'>—</div>"
+    "</div>"
+    "<div class='footer' id='ftr'>refreshing every 1.5 s</div>"
+    "</div>"
+    "<script>"
+    "var TARGETS=['usb_a_1','usb_a_2'];"
+    "var LABELS={available:'AVAILABLE',in_use:'IN USE',fault:'FAULT',not_ready:'NOT READY'};"
+    "function fmt(n,d){return (typeof n==='number'?n:0).toFixed(d);}"
+    "async function tick(){"
+    "try{"
+    "var r=await fetch('/api/ports/sensors',{cache:'no-store'});"
+    "var j=await r.json();"
+    "if(!j||!j.ports)throw new Error('bad response');"
+    "document.getElementById('err').style.display='none';"
+    "for(var i=0;i<j.ports.length;i++){"
+    "var p=j.ports[i];"
+    "if(TARGETS.indexOf(p.port_key)<0)continue;"
+    "var card=document.querySelector(\".card[data-key='\"+p.port_key+\"']\");"
+    "if(!card)continue;"
+    "var s=(p.status||'not_ready').toLowerCase();"
+    "var cls=(s==='in_use')?'in-use':(s==='available')?'available':(s==='fault')?'fault':'not-ready';"
+    "card.className='card '+cls;"
+    "var b=card.querySelector('.badge');"
+    "b.className='badge '+cls;"
+    "b.textContent=LABELS[s]||s.toUpperCase();"
+    "var rd=card.querySelector('.reading');"
+    "rd.innerHTML='<b>'+fmt(p.current_ma,1)+' mA</b> at '+fmt(p.bus_voltage_v,2)+' V';"
+    "}"
+    "document.getElementById('ftr').textContent='updated '+new Date().toLocaleTimeString();"
+    "}catch(e){"
+    "var ee=document.getElementById('err');"
+    "ee.textContent='Lost connection: '+e.message;"
+    "ee.style.display='block';"
+    "}"
+    "}"
+    "tick();setInterval(tick,1500);"
+    "</script></body></html>";
+
+/* ------------------------------------------------------------------------
  * Handlers
  * ------------------------------------------------------------------------ */
 static esp_err_t ports_page_handler(httpd_req_t *req)
@@ -230,12 +335,162 @@ static esp_err_t ports_page_handler(httpd_req_t *req)
     return httpd_resp_send(req, ADMIN_PORTS_HTML, HTTPD_RESP_USE_STRLEN);
 }
 
+static esp_err_t port_occupied_page_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_send(req, PORT_OCCUPIED_HTML, HTTPD_RESP_USE_STRLEN);
+}
+
 static esp_err_t send_json_err(httpd_req_t *req, const char *code, const char *msg)
 {
     char body[128];
     snprintf(body, sizeof(body), "{\"ok\":false,\"error\":\"%s\"}", msg);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_status(req, code);
+    return httpd_resp_sendstr(req, body);
+}
+
+static void json_append(char *buf, size_t buf_len, size_t *offset, const char *fmt, ...)
+{
+    va_list args;
+    int written;
+
+    if (buf == NULL || offset == NULL || *offset >= buf_len) {
+        return;
+    }
+
+    va_start(args, fmt);
+    written = vsnprintf(buf + *offset, buf_len - *offset, fmt, args);
+    va_end(args);
+
+    if (written < 0) {
+        return;
+    }
+
+    if ((size_t)written >= buf_len - *offset) {
+        *offset = buf_len - 1;
+        buf[*offset] = '\0';
+        return;
+    }
+
+    *offset += (size_t)written;
+}
+
+static esp_err_t api_ports_i2c_scan_handler(httpd_req_t *req)
+{
+    uint8_t detected[32];
+    size_t count = 0;
+    esp_err_t err = port_sensors_scan_i2c(detected, sizeof(detected), &count);
+
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        return send_json_err(req,
+                             "409 Conflict",
+                             "port sensors disabled; build with PORT_SENSORS_ENABLED=1");
+    }
+    if (err != ESP_OK) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "i2c scan failed: %s", esp_err_to_name(err));
+        return send_json_err(req, "500 Internal Server Error", msg);
+    }
+
+    char body[768];
+    size_t off = 0;
+    json_append(body, sizeof(body), &off,
+                "{\"ok\":true,\"enabled\":true,"
+                "\"sda_gpio\":%d,\"scl_gpio\":%d,"
+                "\"expected\":[\"0x%02X\",\"0x%02X\",\"0x%02X\",\"0x%02X\"],"
+                "\"detected\":[",
+                PORT_SENSORS_I2C_PIN_SDA,
+                PORT_SENSORS_I2C_PIN_SCL,
+                PORT_SENSORS_INA219_ADDR_USB_C_1,
+                PORT_SENSORS_INA219_ADDR_USB_C_2,
+                PORT_SENSORS_INA219_ADDR_USB_A_1,
+                PORT_SENSORS_INA219_ADDR_USB_A_2);
+
+    for (size_t i = 0; i < count && i < sizeof(detected); i++) {
+        json_append(body, sizeof(body), &off,
+                    "%s\"0x%02X\"",
+                    i == 0 ? "" : ",",
+                    detected[i]);
+    }
+
+    json_append(body, sizeof(body), &off, "],\"count\":%u}", (unsigned)count);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_sendstr(req, body);
+}
+
+static esp_err_t api_ports_sensor_readings_handler(httpd_req_t *req)
+{
+    port_sensor_reading_t readings[PORT_SENSOR_COUNT];
+    esp_err_t err = port_sensors_read_all(readings);
+
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        return send_json_err(req,
+                             "409 Conflict",
+                             "port sensors disabled; build with PORT_SENSORS_ENABLED=1");
+    }
+
+    char body[1280];
+    size_t off = 0;
+    json_append(body, sizeof(body), &off,
+                "{\"ok\":%s,\"enabled\":%s,\"threshold_ma\":%.1f",
+                err == ESP_OK ? "true" : "false",
+                port_sensors_is_enabled() ? "true" : "false",
+                (double)PORT_IN_USE_THRESHOLD_MA);
+    if (err != ESP_OK) {
+        json_append(body, sizeof(body), &off,
+                    ",\"read_error\":\"%s\"",
+                    esp_err_to_name(err));
+    }
+    json_append(body, sizeof(body), &off, ",\"ports\":[");
+
+    for (size_t i = 0; i < PORT_SENSOR_COUNT; i++) {
+        const port_sensor_reading_t *r = &readings[i];
+        json_append(body, sizeof(body), &off,
+                    "%s{\"port_key\":\"%s\",\"address\":\"0x%02X\","
+                    "\"mosfet_gpio\":%d,\"current_ma\":%.1f,"
+                    "\"bus_voltage_v\":%.3f,\"status\":\"%s\"}",
+                    i == 0 ? "" : ",",
+                    r->port_key != NULL ? r->port_key : "",
+                    r->i2c_address,
+                    r->mosfet_gpio,
+                    (double)r->current_ma,
+                    (double)r->bus_voltage_v,
+                    port_sensors_status_string(r->status));
+    }
+
+    json_append(body, sizeof(body), &off, "]}");
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_sendstr(req, body);
+}
+
+static esp_err_t api_ports_sensor_sync_handler(httpd_req_t *req)
+{
+    esp_err_t err = port_sensors_sync_once();
+
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        return send_json_err(req,
+                             "409 Conflict",
+                             "port sensors disabled; build with PORT_SENSORS_ENABLED=1");
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    if (err == ESP_OK) {
+        return httpd_resp_sendstr(req, "{\"ok\":true}");
+    }
+
+    char body[96];
+    snprintf(body,
+             sizeof(body),
+             "{\"ok\":false,\"error\":\"sensor sync failed: %s\"}",
+             esp_err_to_name(err));
+    httpd_resp_set_status(req, "502 Bad Gateway");
     return httpd_resp_sendstr(req, body);
 }
 
@@ -322,6 +577,12 @@ void admin_ports_register_handlers(httpd_handle_t server)
         .handler = ports_page_handler,
         .user_ctx = NULL,
     };
+    static const httpd_uri_t port_occupied_uri = {
+        .uri = "/port-occupied",
+        .method = HTTP_GET,
+        .handler = port_occupied_page_handler,
+        .user_ctx = NULL,
+    };
     static const httpd_uri_t ports_api_uri = {
         .uri = "/api/ports",
         .method = HTTP_POST,
@@ -334,10 +595,32 @@ void admin_ports_register_handlers(httpd_handle_t server)
         .handler = api_battery_handler,
         .user_ctx = NULL,
     };
+    static const httpd_uri_t i2c_scan_api_uri = {
+        .uri = "/api/ports/i2c-scan",
+        .method = HTTP_GET,
+        .handler = api_ports_i2c_scan_handler,
+        .user_ctx = NULL,
+    };
+    static const httpd_uri_t sensor_readings_api_uri = {
+        .uri = "/api/ports/sensors",
+        .method = HTTP_GET,
+        .handler = api_ports_sensor_readings_handler,
+        .user_ctx = NULL,
+    };
+    static const httpd_uri_t sensor_sync_api_uri = {
+        .uri = "/api/ports/sensors/sync",
+        .method = HTTP_POST,
+        .handler = api_ports_sensor_sync_handler,
+        .user_ctx = NULL,
+    };
 
-    httpd_register_uri_handler(server, &page_uri);
-    httpd_register_uri_handler(server, &ports_api_uri);
-    httpd_register_uri_handler(server, &battery_api_uri);
+    register_admin_uri_checked(server, &page_uri);
+    register_admin_uri_checked(server, &port_occupied_uri);
+    register_admin_uri_checked(server, &ports_api_uri);
+    register_admin_uri_checked(server, &battery_api_uri);
+    register_admin_uri_checked(server, &i2c_scan_api_uri);
+    register_admin_uri_checked(server, &sensor_readings_api_uri);
+    register_admin_uri_checked(server, &sensor_sync_api_uri);
 
     ESP_LOGI(TAG, "admin /ports handlers registered");
 }

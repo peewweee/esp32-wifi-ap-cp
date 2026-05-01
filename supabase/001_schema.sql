@@ -82,6 +82,8 @@ create table if not exists public.port_state (
         check (port_key in ('usb_a_1','usb_a_2','usb_c_1','usb_c_2','outlet')),
     status      text not null default 'available'
         check (status in ('available','in_use','fault','offline')),
+    current_ma  numeric,
+    bus_voltage_v numeric,
     updated_at  timestamptz not null default now(),
     unique (station_id, port_key)
 );

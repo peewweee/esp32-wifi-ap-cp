@@ -55,4 +55,11 @@ if(LWIP_LIB)
     target_include_directories(${LWIP_LIB} PUBLIC
         "${CMAKE_CURRENT_LIST_DIR}"
     )
+    # Force the linker to pull hook implementations from libmain.a even though
+    # liblwip.a is scanned first. Without these -u flags the references inside
+    # ip4_input/dhcpserver stay unresolved at link time.
+    target_link_libraries(${LWIP_LIB} INTERFACE
+        "-u solar_hook_ip4_input"
+        "-u solar_hook_dhcps_post_append_opts"
+    )
 endif()

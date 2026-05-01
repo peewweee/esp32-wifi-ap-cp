@@ -20,10 +20,10 @@ extern "C" {
  *   port_state updates.
  *
  * Enable for hardware bring-up:
- *   - Set PORT_SENSORS_ENABLED=1 at build time, or in .env if using the
- *     project CMake bridge.
- *   - Optional: set PORT_SENSORS_SUPABASE_SYNC_ENABLED=0 to scan/read sensors
- *     without pushing detected statuses to Supabase.
+ *   - Set PORT_SENSORS_ENABLED=1 at build time, or in .env through the project
+ *     CMake bridge.
+ *   - Keep PORT_SENSORS_SUPABASE_SYNC_ENABLED=0 until the I2C scan and live
+ *     current readings are verified.
  *
  * Out of scope for this module:
  *   - AC outlet usage detection. The schematic has no AC current sensor yet.
@@ -38,7 +38,7 @@ extern "C" {
 #endif
 
 #ifndef PORT_SENSORS_SUPABASE_SYNC_ENABLED
-#define PORT_SENSORS_SUPABASE_SYNC_ENABLED PORT_SENSORS_ENABLED
+#define PORT_SENSORS_SUPABASE_SYNC_ENABLED 0
 #endif
 
 #ifndef PORT_SENSORS_SYNC_INTERVAL_MS
@@ -49,10 +49,19 @@ extern "C" {
 #define PORT_SENSORS_SYNC_STACK_BYTES 6144
 #endif
 
-/* I2C wiring: all four INA219 devices share this bus. */
+/* I2C wiring: all four INA219 devices share this bus.
+ * Clock kept at 100 kHz because the PCB pulls SDA/SCL up to 5 V via the
+ * INA219 boards (their VCC is on a 5 V rail). The ESP32's internal clamp
+ * diodes hold the line near 3.6-4 V at the cost of slow edges, so we run
+ * standard-mode 100 kHz instead of fast-mode 400 kHz.
+ *
+ * SCL is on GPIO 32 (not the PCB-routed GPIO 22) because the etched SCL
+ * trace from GPIO 22 is shorted to GND somewhere on the board. We bypass
+ * it with a fly wire from GPIO 32 to one of the INA219 SCL pads. GPIO 22
+ * is left unconfigured. */
 #define PORT_SENSORS_I2C_PIN_SDA   21
-#define PORT_SENSORS_I2C_PIN_SCL   22
-#define PORT_SENSORS_I2C_FREQ_HZ   400000
+#define PORT_SENSORS_I2C_PIN_SCL   32
+#define PORT_SENSORS_I2C_FREQ_HZ   100000
 
 /* INA219 7-bit addresses per port. Each physical module must be unique. */
 #define PORT_SENSORS_INA219_ADDR_USB_C_1   0x40
@@ -118,7 +127,11 @@ esp_err_t port_sensors_read(port_sensor_id_t id, port_sensor_reading_t *out);
 /* Read all four USB ports. */
 esp_err_t port_sensors_read_all(port_sensor_reading_t out[PORT_SENSOR_COUNT]);
 
-/* Start the optional periodic Supabase sync task.
+/* One-shot Supabase sync using the same port_state upsert path as /ports.
+ * No-op unless PORT_SENSORS_ENABLED=1. */
+esp_err_t port_sensors_sync_once(void);
+
+/* Optional periodic Supabase sync task.
  * No-op unless PORT_SENSORS_ENABLED=1 and PORT_SENSORS_SUPABASE_SYNC_ENABLED=1. */
 esp_err_t port_sensors_start_supabase_sync(void);
 

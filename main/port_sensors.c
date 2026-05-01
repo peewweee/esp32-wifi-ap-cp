@@ -40,8 +40,6 @@ static const port_sensor_descriptor_t s_descriptors[PORT_SENSOR_COUNT] = {
     },
 };
 
-static bool s_initialized;
-
 static void fill_not_ready_reading(port_sensor_id_t id, port_sensor_reading_t *out)
 {
     if (out == NULL) {
@@ -56,10 +54,10 @@ static void fill_not_ready_reading(port_sensor_id_t id, port_sensor_reading_t *o
     }
 
     const port_sensor_descriptor_t *d = &s_descriptors[id];
-    out->id            = d->id;
-    out->port_key      = d->port_key;
-    out->i2c_address   = d->i2c_address;
-    out->mosfet_gpio   = d->mosfet_gpio;
+    out->id          = d->id;
+    out->port_key    = d->port_key;
+    out->i2c_address = d->i2c_address;
+    out->mosfet_gpio = d->mosfet_gpio;
 }
 
 #if PORT_SENSORS_ENABLED
@@ -105,9 +103,46 @@ static void fill_not_ready_reading(port_sensor_id_t id, port_sensor_reading_t *o
 #define PORT_SENSORS_STATION_ID "solar-hub-01"
 #endif
 
+static bool s_initialized;
 static bool s_i2c_installed;
 static bool s_sensor_present[PORT_SENSOR_COUNT];
+#if PORT_SENSORS_SUPABASE_SYNC_ENABLED
 static bool s_sync_task_started;
+#endif
+
+/* Read SDA/SCL with the I2C driver detached. With internal pull-ups
+ * enabled, both lines should read HIGH when idle. If a line reads LOW
+ * here, the bus is held low by something (stuck device, PCB short to
+ * GND, or damaged GPIO). Logged for diagnostic clarity. */
+static void log_bus_idle_state(void)
+{
+    gpio_config_t cfg = {
+        .pin_bit_mask = (1ULL << PORT_SENSORS_I2C_PIN_SDA) |
+                        (1ULL << PORT_SENSORS_I2C_PIN_SCL),
+        .mode         = GPIO_MODE_INPUT,
+        .pull_up_en   = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&cfg);
+    /* Brief settle so internal pull-ups have time to drag the line up. */
+    vTaskDelay(pdMS_TO_TICKS(2));
+
+    int sda = gpio_get_level(PORT_SENSORS_I2C_PIN_SDA);
+    int scl = gpio_get_level(PORT_SENSORS_I2C_PIN_SCL);
+    ESP_LOGI(TAG, "bus idle state with internal pull-ups: SDA=%d SCL=%d",
+             sda, scl);
+    if (sda == 0) {
+        ESP_LOGW(TAG, "SDA is stuck LOW — bus shorted to GND, held by a "
+                      "stuck device, or GPIO%d damaged",
+                 PORT_SENSORS_I2C_PIN_SDA);
+    }
+    if (scl == 0) {
+        ESP_LOGW(TAG, "SCL is stuck LOW — bus shorted to GND, held by a "
+                      "stuck device, or GPIO%d damaged",
+                 PORT_SENSORS_I2C_PIN_SCL);
+    }
+}
 
 static esp_err_t i2c_bus_install(void)
 {
@@ -115,12 +150,18 @@ static esp_err_t i2c_bus_install(void)
         return ESP_OK;
     }
 
+    log_bus_idle_state();
+
+    /* Internal pull-ups disabled: this board has strong external pull-ups
+     * (the INA219 breakouts pull SDA/SCL up to their VCC = 5 V rail).
+     * Adding the ESP32's internal 45 kohm pull-up to 3.3 V on top would
+     * just leak current through the GPIO clamp diodes. */
     i2c_config_t cfg = {
         .mode = I2C_MODE_MASTER,
         .sda_io_num = PORT_SENSORS_I2C_PIN_SDA,
         .scl_io_num = PORT_SENSORS_I2C_PIN_SCL,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .sda_pullup_en = GPIO_PULLUP_DISABLE,
+        .scl_pullup_en = GPIO_PULLUP_DISABLE,
         .master.clk_speed = PORT_SENSORS_I2C_FREQ_HZ,
     };
 
@@ -277,9 +318,14 @@ static void log_reading(const port_sensor_reading_t *reading)
 static esp_err_t sync_reading_to_supabase(const port_sensor_reading_t *reading)
 {
     char payload[192];
-    const char *status = port_sensors_status_string(reading->status);
+    const char *status;
 
-    if (reading == NULL || reading->port_key == NULL || status == NULL) {
+    if (reading == NULL || reading->port_key == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    status = port_sensors_status_string(reading->status);
+    if (status == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -312,6 +358,7 @@ static esp_err_t sync_reading_to_supabase(const port_sensor_reading_t *reading)
     return ESP_OK;
 }
 
+#if PORT_SENSORS_SUPABASE_SYNC_ENABLED
 static void port_sensors_sync_task(void *pvParameters)
 {
     (void)pvParameters;
@@ -329,24 +376,11 @@ static void port_sensors_sync_task(void *pvParameters)
              (double)PORT_IN_USE_THRESHOLD_MA);
 
     while (true) {
-        port_sensor_reading_t readings[PORT_SENSOR_COUNT];
-        esp_err_t read_err = port_sensors_read_all(readings);
-        if (read_err != ESP_OK) {
-            ESP_LOGW(TAG,
-                     "one or more port sensor reads failed before Supabase sync: %s",
-                     esp_err_to_name(read_err));
-        }
-
-        for (size_t i = 0; i < PORT_SENSOR_COUNT; i++) {
-            if (readings[i].status == PORT_SENSOR_STATUS_NOT_READY) {
-                continue;
-            }
-            sync_reading_to_supabase(&readings[i]);
-        }
-
+        port_sensors_sync_once();
         vTaskDelay(delay_ticks);
     }
 }
+#endif
 
 #endif /* PORT_SENSORS_ENABLED */
 
@@ -397,7 +431,7 @@ esp_err_t port_sensors_init(void)
 
     s_initialized = true;
     ESP_LOGI(TAG,
-             "port sensors initialized; threshold=%.1f mA, Supabase sync=%s",
+             "port sensors initialized; threshold=%.1f mA, Supabase periodic sync=%s",
              (double)PORT_IN_USE_THRESHOLD_MA,
              PORT_SENSORS_SUPABASE_SYNC_ENABLED ? "enabled" : "disabled");
     return ESP_OK;
@@ -522,11 +556,7 @@ esp_err_t port_sensors_read(port_sensor_id_t id, port_sensor_reading_t *out)
 
     out->bus_voltage_v = (float)((bus_raw >> 3) & 0x1FFF) * INA219_BUS_VOLTAGE_LSB_V;
     out->current_ma = (float)((int16_t)current_raw) * PORT_SENSORS_INA219_CURRENT_LSB_MA;
-
-    const float current_mag_ma = out->current_ma < 0.0f
-                                     ? -out->current_ma
-                                     : out->current_ma;
-    out->status = (current_mag_ma > PORT_IN_USE_THRESHOLD_MA)
+    out->status = (out->current_ma > PORT_IN_USE_THRESHOLD_MA)
                       ? PORT_SENSOR_STATUS_IN_USE
                       : PORT_SENSOR_STATUS_AVAILABLE;
 
@@ -562,6 +592,30 @@ esp_err_t port_sensors_read_all(port_sensor_reading_t out[PORT_SENSOR_COUNT])
     return first_err;
 }
 
+esp_err_t port_sensors_sync_once(void)
+{
+#if PORT_SENSORS_ENABLED
+    port_sensor_reading_t readings[PORT_SENSOR_COUNT];
+    esp_err_t first_err = port_sensors_read_all(readings);
+
+    for (size_t i = 0; i < PORT_SENSOR_COUNT; i++) {
+        if (readings[i].status == PORT_SENSOR_STATUS_NOT_READY) {
+            continue;
+        }
+
+        esp_err_t err = sync_reading_to_supabase(&readings[i]);
+        if (err != ESP_OK && first_err == ESP_OK) {
+            first_err = err;
+        }
+    }
+
+    return first_err;
+#else
+    ESP_LOGI(TAG, "port sensor Supabase sync skipped because PORT_SENSORS_ENABLED=0");
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
 esp_err_t port_sensors_start_supabase_sync(void)
 {
 #if PORT_SENSORS_ENABLED && PORT_SENSORS_SUPABASE_SYNC_ENABLED
@@ -589,7 +643,7 @@ esp_err_t port_sensors_start_supabase_sync(void)
     return ESP_OK;
 #else
     ESP_LOGI(TAG,
-             "port sensor Supabase sync not started "
+             "port sensor Supabase periodic sync not started "
              "(PORT_SENSORS_ENABLED=%d, PORT_SENSORS_SUPABASE_SYNC_ENABLED=%d)",
              PORT_SENSORS_ENABLED,
              PORT_SENSORS_SUPABASE_SYNC_ENABLED);

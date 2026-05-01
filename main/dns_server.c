@@ -69,6 +69,55 @@ static bool dns_is_a_record_query(const uint8_t *packet, size_t packet_len)
     return ntohs(qtype) == 1 && ntohs(qclass) == 1;
 }
 
+static bool dns_get_question_info(const uint8_t *packet,
+                                  size_t packet_len,
+                                  char *name_out,
+                                  size_t name_out_len,
+                                  uint16_t *qtype_out)
+{
+    size_t offset = 12;
+    size_t name_pos = 0;
+    size_t question_end;
+    uint16_t qtype;
+
+    if (packet_len < 16 || name_out == NULL || name_out_len == 0 || qtype_out == NULL) {
+        return false;
+    }
+
+    name_out[0] = '\0';
+
+    while (offset < packet_len) {
+        uint8_t label_len = packet[offset++];
+
+        if (label_len == 0) {
+            break;
+        }
+
+        if ((label_len & 0xC0) != 0 || (offset + label_len) > packet_len) {
+            return false;
+        }
+
+        if (name_pos > 0 && name_pos < (name_out_len - 1)) {
+            name_out[name_pos++] = '.';
+        }
+
+        for (uint8_t i = 0; i < label_len && name_pos < (name_out_len - 1); i++) {
+            name_out[name_pos++] = (char)packet[offset + i];
+        }
+        name_out[name_pos] = '\0';
+        offset += label_len;
+    }
+
+    question_end = offset;
+    if (question_end == 0 || (question_end + 4) > packet_len) {
+        return false;
+    }
+
+    memcpy(&qtype, packet + question_end, sizeof(qtype));
+    *qtype_out = ntohs(qtype);
+    return true;
+}
+
 static ssize_t build_dns_response(const uint8_t *query, size_t query_len, uint8_t *response, size_t response_size, bool answer_with_portal_ip)
 {
     size_t question_end;
@@ -285,6 +334,8 @@ static void dns_server_task(void *arg)
         ssize_t query_len = recvfrom(sock, query, sizeof(query), 0, (struct sockaddr *)&client_addr, &client_addr_len);
         ssize_t response_len = -1;
         bool authenticated;
+        char qname[96] = "<unknown>";
+        uint16_t qtype = 0;
 
         if (query_len <= 0) {
             continue;
@@ -295,9 +346,13 @@ static void dns_server_task(void *arg)
         }
 
         authenticated = is_client_session_active(client_addr.sin_addr.s_addr);
+        dns_get_question_info(query, (size_t)query_len, qname, sizeof(qname), &qtype);
 
         if (authenticated) {
-            ESP_LOGI(TAG, "Authenticated DNS query from " IPSTR, IP2STR((ip4_addr_t *)&client_addr.sin_addr.s_addr));
+            ESP_LOGI(TAG, "Authenticated DNS query from " IPSTR " qtype=%u name=%s",
+                     IP2STR((ip4_addr_t *)&client_addr.sin_addr.s_addr),
+                     qtype,
+                     qname);
             if (!forward_dns_query(query, (size_t)query_len, response, &response_len)) {
                 ESP_LOGW(TAG, "All upstream DNS attempts failed for client " IPSTR,
                          IP2STR((ip4_addr_t *)&client_addr.sin_addr.s_addr));
@@ -306,8 +361,10 @@ static void dns_server_task(void *arg)
                 response_len = build_dns_servfail_response(query, (size_t)query_len, response, sizeof(response));
             }
         } else {
-            ESP_LOGI(TAG, "Captive DNS response for unauthenticated client " IPSTR,
-                     IP2STR((ip4_addr_t *)&client_addr.sin_addr.s_addr));
+            ESP_LOGI(TAG, "Captive DNS response for unauthenticated client " IPSTR " qtype=%u name=%s",
+                     IP2STR((ip4_addr_t *)&client_addr.sin_addr.s_addr),
+                     qtype,
+                     qname);
             response_len = build_dns_response(
                 query,
                 (size_t)query_len,
