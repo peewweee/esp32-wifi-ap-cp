@@ -42,6 +42,7 @@
 
 #include "dns_server.h"
 #include "net_diag.h"
+#include "port_sensors.h"
 
 #if !IP_NAPT
 #error "IP_NAPT must be defined"
@@ -647,6 +648,15 @@ void app_main(void)
 
     // Setup WIFI
     wifi_init(mac, ssid, ent_username, ent_identity, passwd, static_ip, subnet_mask, gateway_addr, ap_mac, ap_ssid, ap_passwd, ap_ip);
+
+    esp_err_t port_sensor_err = port_sensors_init();
+    if (port_sensor_err != ESP_OK) {
+        ESP_LOGW(TAG, "Port sensor init failed: %s", esp_err_to_name(port_sensor_err));
+    }
+    port_sensor_err = port_sensors_start_supabase_sync();
+    if (port_sensor_err != ESP_OK) {
+        ESP_LOGW(TAG, "Port sensor Supabase sync start failed: %s", esp_err_to_name(port_sensor_err));
+    }
 
     net_diag_start_task();
     net_diag_set_napt_state(false, ESP_OK);

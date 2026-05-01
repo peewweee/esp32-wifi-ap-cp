@@ -1,5 +1,24 @@
 {
   "permissions": {
+    "allow": [
+      "Bash(PORT_SENSORS_ENABLED=1 PORT_SENSORS_SUPABASE_SYNC_ENABLED=0 PORT_IN_USE_THRESHOLD_MA=50.0 pio run -e esp32dev --target upload --upload-port COM5)",
+      "PowerShell(. 'C:\\\\Espressif\\\\frameworks\\\\esp-idf-v5.3.1\\\\export.ps1'; if \\(-not $?\\) { Write-Output 'EXPORT_FAILED'; exit 1 }; Set-Location 'C:\\\\cp\\\\esp32-wifi-ap-cp'; $env:PORT_SENSORS_ENABLED='1'; $env:PORT_SENSORS_SUPABASE_SYNC_ENABLED='0'; $env:PORT_IN_USE_THRESHOLD_MA='50.0'; Write-Output '=== fullclean ==='; idf.py fullclean; if \\(-not $?\\) { Write-Output 'FULLCLEAN_FAILED'; exit 1 }; Write-Output '=== build + flash ==='; idf.py -p COM5 flash)",
+      "PowerShell($env:IDF_PATH = 'C:\\\\Espressif\\\\frameworks\\\\esp-idf-v5.3.1'; python 'C:\\\\Espressif\\\\frameworks\\\\esp-idf-v5.3.1\\\\tools\\\\idf_tools.py' install-python-env)",
+      "PowerShell(. 'C:\\\\Espressif\\\\frameworks\\\\esp-idf-v5.3.1\\\\export.ps1'; if \\(-not $?\\) { Write-Output 'EXPORT_FAILED'; exit 1 }; Set-Location 'C:\\\\cp\\\\esp32-wifi-ap-cp'; $env:PORT_SENSORS_ENABLED='1'; $env:PORT_SENSORS_SUPABASE_SYNC_ENABLED='0'; $env:PORT_IN_USE_THRESHOLD_MA='50.0'; idf.py -p COM5 flash)",
+      "PowerShell($port = New-Object System.IO.Ports.SerialPort\\('COM5', 115200, 'None', 8, 'One'\\); $port.ReadTimeout = 500; $port.Open\\(\\); $port.DtrEnable = $false; $port.RtsEnable = $true; Start-Sleep -Milliseconds 100; $port.RtsEnable = $false; Start-Sleep -Milliseconds 100; $end = \\(Get-Date\\).AddSeconds\\(15\\); while \\(\\(Get-Date\\) -lt $end\\) { try { $line = $port.ReadLine\\(\\); Write-Output $line } catch [System.TimeoutException] { } }; $port.Close\\(\\))",
+      "Bash(python -c \"import fitz; print\\(fitz.__version__\\)\")",
+      "Bash(python -c \"from pdf2image import convert_from_path\")",
+      "Read(//c/Program Files \\(x86\\)/Microsoft/Edge/Application/**)",
+      "Bash(mkdir -p /tmp/schem)",
+      "Read(//tmp/**)",
+      "Bash(cat)",
+      "Bash(\"C:\\\\Espressif\\\\python_env\\\\idf5.3_py3.13_env\\\\Scripts\\\\python.exe\" /tmp/serial_capture.py)",
+      "Bash(mkdir -p \"/c/Users/Phoebe Rhone Gangoso/AppData/Local/Temp/serial\")",
+      "Bash(\"C:\\\\Espressif\\\\python_env\\\\idf5.3_py3.13_env\\\\Scripts\\\\python.exe\" \"C:\\\\Users\\\\Phoebe Rhone Gangoso\\\\AppData\\\\Local\\\\Temp\\\\serial\\\\capture.py\")",
+      "Read(//c/Users/Phoebe Rhone Gangoso/AppData/Local/Temp/serial/**)",
+      "Bash(\"C:\\\\Espressif\\\\python_env\\\\idf5.3_py3.13_env\\\\Scripts\\\\python.exe\" -c \"data = open\\(r'C:\\\\Users\\\\Phoebe Rhone Gangoso\\\\AppData\\\\Local\\\\Temp\\\\serial\\\\serial.log','rb'\\).read\\(\\); import re; clean = re.sub\\(rb'\\\\x1b\\\\[[0-9;]*m', b'', data\\); sys.stdout.buffer.write\\(clean\\) if False else print\\(clean.decode\\('utf-8','replace'\\)\\)\")",
+      "Bash(C:\\\\Espressif\\\\python_env\\\\idf5.3_py3.13_env\\\\Scripts\\\\python.exe *)"
+    ],
     "additionalDirectories": [
       "C:\\Users\\Phoebe Rhone Gangoso\\Downloads\\solar-powered-charging-station-pwa",
       "C:\\cp\\esp32-wifi-ap-cp"
