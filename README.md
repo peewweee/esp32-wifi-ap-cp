@@ -1,203 +1,332 @@
-# ESP32 NAT Router with WPA2 Enterprise support
+# Smart Solar Hub — ESP32 Embedded Control Firmware
 
-This is a firmware to use the ESP32 as WiFi NAT router. It can be used as
-- Simple range extender for an existing WiFi network
-- Setting up an additional WiFi network with different SSID/password for guests or IOT devices
-- Convert a corporate (WPA2-Enterprise) network to a regular network, for simple devices.
+## Thesis Project
 
+**Title:** Development and Implementation of Solar-Powered Smart Charging Station with Integrated Connectivity
 
-It can achieve a bandwidth of more than 15mbps.
+**Station Brand:** SOLAR CONNECT
 
-The code is based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example). 
+**Project Concept:** The Smart Solar Hub — an off-grid solar charging station that combines renewable energy harvesting, intelligent power management, RFID-based access control, and cloud-connected transparency through a Progressive Web App dashboard.
+
+This repository contains the **ESP32 embedded control firmware** that implements:
+- WiFi connectivity and captive portal access control
+- RFID-based physical activation of charging hardware
+- Real-time port current sensing and energy tracking
+- Battery-level-based operational thresholds for safe energy management
+- Cloud synchronization with Supabase for remote visibility
+- PWA dashboard integration for user access and station transparency
+
+---
+
+## System Overview
+
+### Architecture Layers
+
+```
+┌─────────────────────────────────────────────────┐
+│  Cloud / PWA Dashboard                          │
+│  (Vercel-hosted @ https://solarconnect.live)   │
+└─────────────────────────────────────────────────┘
+                      ↑
+                 Supabase REST API
+                      ↓
+┌─────────────────────────────────────────────────┐
+│  ESP32 Embedded Control (THIS REPO)             │
+│  • WiFi AP + Captive Portal                     │
+│  • Session & Access Control                     │
+│  • RFID Card Authentication                     │
+│  • Port Telemetry (USB-A, USB-C, AC)           │
+│  • Battery Management & Thresholds              │
+│  • Energy Tracking & Eco Metrics                │
+└─────────────────────────────────────────────────┘
+                      ↓
+┌─────────────────────────────────────────────────┐
+│  Power & Charging Hardware                      │
+│  • Solar Panel (200W)                           │
+│  • LiFePO4 Battery (12V 100Ah)                 │
+│  • Charging Ports (2x USB-A, 2x USB-C, 1x AC) │
+│  • Current Sensors (INA219)                     │
+│  • Power Switching (MOSFET, SSR, Relay)        │
+│  • RFID Reader (MFRC522)                        │
+└─────────────────────────────────────────────────┘
+```
+
+### Key Features
+
+#### ✅ Implemented
+- **RFID Access Control** — Valid cards activate charging ports and WiFi user access
+- **Captive Portal** — Terms acceptance gate for users joining the WiFi network
+- **Session Management** — 1-hour daily quota per device with one-time PWA linking
+- **Port Telemetry** — USB port current sensing (INA219, 4 ports)
+- **Supabase Integration** — Real-time sync of sessions, port state, battery level
+- **PWA Linking** — One-time redirect URL binds browser to station identity
+- **Eco Metrics Framework** — Energy (Wh) and CO2 savings (g) calculation ready
+- **Serial CLI** — Configuration and diagnostics via UART console
+
+#### 🚧 Planned / In Progress
+- **Battery ADC Reading** — Measure LiFePO4 state of charge from voltage divider
+- **AC Sensor Reading** — Current measurement for AC outlet
+- **Battery Operational Thresholds** — Graceful system degradation:
+  - **25% falling:** WiFi (Users) disabled, charging continues
+  - **15% falling:** Charging ports OFF, WiFi (MCU telemetry only)
+  - **10% falling:** Complete system shutdown to protect battery
+  - **13%-30% recovering:** Asymmetric recovery to avoid battery cycling
+- **System State Machine** — Global coordination of RFID + battery level + WiFi mode
+- **Power State Coordination** — Override RFID when battery critical
+- **Graceful Shutdown** — Final telemetry sync before power loss
+
+---
+
+## Quick Start
+
+### Prerequisites
+- ESP32 development board (tested: ESP32D0WDQ6, ESP32-C3, ESP32-S3)
+- ESP-IDF v5.1.2+ or PlatformIO
+- MFRC522 RFID module (wired, currently disabled)
+- INA219 current sensors (optional, disabled by default)
+- LiFePO4 battery with voltage divider (planned)
+
+### Building
+
+#### Using PlatformIO
+```bash
+pio run -e esp32dev -t upload -t monitor
+```
+
+#### Using ESP-IDF
+```bash
+idf.py set-target esp32
+idf.py build
+idf.py flash monitor
+```
+
+### First Boot
+
+After flashing, the ESP32 will:
+1. Start as WiFi access point `SOLAR CONNECT` (open network)
+2. Initialize RFID polling (disabled if `RFID_ENABLED=0`)
+3. Expose captive portal at `http://192.168.4.1/`
+4. Start Supabase heartbeat (if API key configured)
+5. Open serial console at 115200 baud
+
+Connect to `SOLAR CONNECT` WiFi, open browser, and you should see the terms & conditions page.
+
+---
+
+## Hardware Integration
+
+### Wiring (RFID Module - MFRC522)
+| MFRC522 | ESP32 |
+|---------|-------|
+| SDA/SS  | GPIO 5 |
+| SCK     | GPIO 18 |
+| MOSI    | GPIO 23 |
+| MISO    | GPIO 19 |
+| RST     | GPIO 4 |
+| VCC     | 3.3V |
+| GND     | GND |
+
+### Power Control GPIOs
+- **GPIO 12** — USB-C Port 1 MOSFET
+- **GPIO 14** — USB-C Port 2 MOSFET
+- **GPIO 27** — USB-A Port 1 MOSFET
+- **GPIO 26** — USB-A Port 2 MOSFET
+- **GPIO 25** — AC Outlet SSR
+- **GPIO 13** — Relay (future use)
+
+### Port Current Sensors (INA219)
+I2C bus (GPIO 21 SDA, GPIO 32 SCL) at 100 kHz
+
+| Port | I2C Address |
+|------|-------------|
+| USB-C 1 | 0x40 |
+| USB-C 2 | 0x41 |
+| USB-A 1 | 0x44 |
+| USB-A 2 | 0x45 |
+
+### Battery Voltage (Planned)
+- Voltage divider on GPIO (ADC input) → LiFePO4 battery
+- BMS or fuel gauge IC (if available)
+
+---
+
+## Configuration
+
+### Build-Time (CMake)
+```cmake
+PROJECT_SUPABASE_BASE_URL=https://your-project.supabase.co
+PROJECT_SUPABASE_API_KEY=your-api-key
+PROJECT_ADMIN_USERNAME=admin
+PROJECT_ADMIN_PASSWORD=your-password
+PORT_SENSORS_ENABLED=0  # Set to 1 to enable INA219 reading
+PORT_SENSORS_SUPABASE_SYNC_ENABLED=0  # Set to 1 for automatic sync
+```
+
+### Runtime (Serial Console)
+```bash
+# Configure STA uplink (for MCU telemetry)
+set_sta SSID password
+
+# Configure AP settings
+set_ap "SOLAR CONNECT" ""
+
+# View config
+show
+
+# Reboot
+restart
+```
+
+### NVS Namespace: `esp32_nat`
+- `ssid` — STA SSID
+- `passwd` — STA password
+- `ap_ssid` — AP SSID (default: "SOLAR CONNECT")
+- `ap_passwd` — AP password
+- `ap_ip` — AP IP address (default: 192.168.4.1)
+- `lock` — Disable web services if set to "1"
+
+---
+
+## Web Interface
+
+### Captive Portal (`/`)
+- Terms & conditions acceptance gate
+- Redirects to `/confirm` after acceptance
+- Returns connected status to OS probes
+
+### Session Status (`/api/status`)
+- JSON response with remaining seconds and session state
+- Used by PWA to display countdown
+
+### Admin Test UI (`/ports`)
+- Manual toggle of port status (test/demo only)
+- Slider for battery percentage simulation
+- Sends to Supabase for dashboard preview
+
+### Configuration (`/config`)
+- AP/STA WiFi settings (HTTP Basic auth: admin/admin123)
+- Reboot button
+- **Note:** Web config is secondary; CLI is more reliable
+
+---
+
+## Supabase Schema
+
+Three main tables for thesis integration:
+
+### `sessions`
+- `session_token` — Unique per login session
+- `device_hash` — Stable client identity
+- `installation_id` — PWA browser identity (set by one-time link)
+- `remaining_seconds` — Time left in quota
+- `status` — active | expired | disconnected
+
+### `port_state`
+- `station_id` — "solar-hub-01"
+- `port_key` — usb_a_1 | usb_a_2 | usb_c_1 | usb_c_2 | outlet
+- `status` — available | in_use | fault | offline
+- `current_ma` — Current draw (mA)
+- `bus_voltage_v` — Bus voltage (V)
+
+### `station_state`
+- `station_id` — "solar-hub-01"
+- `battery_percent` — 0-100 (from ADC, currently manual test UI)
+- `updated_at` — Last update timestamp
+
+---
+
+## Operational Thresholds (In Development)
+
+The system will enforce these battery-level-based modes to maximize solar efficiency and protect hardware:
+
+| Battery % | Trend | Charging | WiFi (Users) | WiFi (MCU) | State |
+|-----------|-------|---|---|---|---|
+| 100-26% | Any | ON | ON | ON | Full Service |
+| 25% | ↓ | ON | **OFF** | ON | Users WiFi Disabled |
+| 15% | ↓ | **OFF** | OFF | ON | **MCU Telemetry Only** |
+| 10% | ↓ | OFF | OFF | **OFF** | **SHUTDOWN** |
+| 13% | ↑ | OFF | OFF | **ON** | Waking Up |
+| 20% | ↑ | **ON** | OFF | ON | Charging Resumes |
+| 30% | ↑ | ON | **ON** | ON | Full Service |
+
+---
 
 ## Performance
 
-All tests used `IPv4` and the `TCP` protocol.
+Performance tested on ESP32D0WDQ6 with iperf3:
 
-| Board | Tools | Optimization | CPU Frequency | Throughput | Power |
-| ----- | ----- | ------------ | ------------- | ---------- | ----- |
-| `ESP32D0WDQ6` | `iperf3` | `0g` | `240MHz` | `16.0 MBits/s` | `1.6 W` |
-| `ESP32D0WDQ6` | `iperf3` | `0s` | `240MHz` | `10.0 MBits/s` | `1.8 W` | 
-| `ESP32D0WDQ6` | `iperf3` | `0g` | `160MHz` | `15.2 MBits/s` | `1.4 W` |
-| `ESP32D0WDQ6` | `iperf3` | `0s` | `160MHz` | `14.1 MBits/s` | `1.5 W` |
+| Optimization | CPU Freq | Throughput | Power |
+|---|---|---|---|
+| `-0g` | 240 MHz | 16.0 Mbps | 1.6 W |
+| `-0s` | 240 MHz | 10.0 Mbps | 1.8 W |
+| `-0g` | 160 MHz | 15.2 Mbps | 1.4 W |
+| `-0s` | 160 MHz | 14.1 Mbps | 1.5 W |
 
-## First Boot
-After first boot the ESP32 NAT Router will offer a WiFi network with an open AP and the ssid "ESP32_NAT_Router". Configuration can either be done via a simple web interface or via the serial console. 
+---
 
-## Web Config Interface
-The web interface allows for the configuration of all parameters. Connect you PC or smartphone to the WiFi SSID "ESP32_NAT_Router" and point your browser to "http://192.168.4.1". This page should appear:
+## Project Status
 
-<img src="https://raw.githubusercontent.com/marci07iq/esp32_nat_router/master/ESP32_NAT_UI3.png">
+### Current Focus
+- ✅ WiFi AP + Captive Portal (stable)
+- ✅ Session management + PWA linking (stable)
+- ✅ RFID card authentication (working)
+- ✅ Port sensor code prepared (INA219)
+- 🚧 Battery threshold state machine (design phase)
+- 🚧 Power state coordination (design phase)
 
-First enter the appropriate values for the uplink WiFi network, the "STA Settings". Leave password blank for open networks. Click "Connect". The ESP32 reboots and will connect to your WiFi router.
+### Known Limitations
+- RFID power control is independent of battery level (will be coordinated)
+- WiFi AP always active when RFID card present (need mode switching)
+- Battery reading only via manual test UI (need ADC integration)
+- AC outlet has no current sensor yet (waiting for hardware)
+- No graceful shutdown at battery critical threshold (planned)
 
-Now you can reconnect and reload the page and change the "Soft AP Settings". Click "Set" and again the ESP32 reboots. Now it is ready for forwarding traffic over the newly configured Soft AP. Be aware that these changes also affect the config interface, i.e. to do further configuration, connect to the ESP32 through one of the newly configured WiFi networks.
+### Next Steps
+1. Implement battery ADC reading from LiFePO4 voltage divider
+2. Build battery-aware state machine with hysteresis
+3. Integrate WiFi mode switching (AP vs. STA-only) based on state
+4. Refactor RFID module to respect battery thresholds
+5. Add system state reporting to Supabase and PWA dashboard
+6. Validate full threshold cycle with simulated battery curves
 
-If you want to enter a '+' in the web interface you have to use HTTP-style hex encoding like "Mine%2bYours". This will result in a string "Mine+Yours". With this hex encoding you can enter any byte value you like, except for 0 (for C-internal reasons).
+---
 
-It you want to disable the web interface (e.g. for security reasons), go to the CLI and enter:
-```
-nvs_namespace esp32_nat
-nvs_set lock str -v 1
-```
-After restart, no webserver is started any more. You can only re-enable it with:
-```
-nvs_namespace esp32_nat
-nvs_set lock str -v 0
-```
-If you made a mistake and have lost all contact with the ESP you can still use the serial console to reconfigure it. All parameter settings are stored in NVS (non volatile storage), which is *not* erased by simple re-flashing the binaries. If you want to wipe it out, use "esptool.py -p /dev/ttyUSB0 erase_flash".
+## Documentation
 
-## Access devices behind the router
+- [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) — Complete system architecture and implementation status
+- [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md) — Detailed subsystem design
+- [PWA_LINKING_CONTRACT.md](PWA_LINKING_CONTRACT.md) — Browser-device identity binding spec
+- [supabase/001_schema.sql](supabase/001_schema.sql) — Database schema and RPC definitions
 
-If you want to access a device behind the esp32 NAT router? `PC -> local router -> esp32NAT -> server`
+---
 
-Lets say "server" is exposing a webserver on port 80 and you want to access that from your PC.  
-For that you need to configure a portmap (e.g. by connecting via the arduino IDE uart monitor through USB)
+## Repository
 
-```
-portmap add TCP 8080 192.168.4.2 80
-                                 ↑ port of the webserver
-                            ↑ server's ip in esp32NAT network
-                  ↑ exposed port in the local router's network
-```
-     
-Assuming the esp32NAT's ip address in your `local router` is `192.168.0.57` you can acces the server by typing `192.168.0.57:8080` into your browser now.
+- **Base:** ESP-IDF + PlatformIO
+- **Main:** `main/esp32_nat_router.c`, `http_server.c`, `rfid_reader.c`, `port_sensors.c`, `supabase_client.c`
+- **Components:** Router CLI, NVS CLI, System CLI, LWIP hooks
+- **Partition:** NVS (24K) + Factory App (1200K) + SPIFFS (2M)
+- **Build Targets:** ESP32, ESP32-C3, ESP32-S3
 
-## Interpreting the on board LED
+---
 
-If the ESP32 is connected to the upstream AP then the on board LED should be on, otherwise off.
-If there are devices connected to the ESP32 then the on board LED will keep blinking as many times as the number of devices connected.
+## License
 
-For example:
+This project is part of a thesis submission. See repository for license details.
 
-One device connected to the ESP32, and the ESP32 is connected to upstream: 
+---
 
-`*****.*****`
+## References
 
-Two devices are connected to the ESP32, but the ESP32 is not connected to upstream: 
+- [ESP-IDF NAT Router Example](https://github.com/jonask1337/esp-idf-nat-example)
+- [Supabase Documentation](https://supabase.com/docs)
+- [MFRC522 RFID Reader](https://github.com/miguelbalboa/rfid)
+- [INA219 Current Sensor](https://adafruit.github.io/Adafruit_INA219/)
 
-`....*.*....`
+---
 
-# Command Line Interface
-
-For configuration you have to use a serial console (Putty or GtkTerm with 115200 bps).
-Use the "set_sta" and the "set_ap" command to configure the WiFi settings. Changes are stored persistently in NVS and are applied after next restart. Use "show" to display the current config. The NVS namespace for the parameters is "esp32_nat"
-
-Enter the `help` command get a full list of all available commands:
-```
-help 
-  Print the list of registered commands
-
-free 
-  Get the current size of free heap memory
-
-heap 
-  Get minimum size of free heap memory that was available during program execu
-  tion
-
-version 
-  Get version of chip and SDK
-
-restart 
-  Software reset of the chip
-
-deep_sleep  [-t <t>] [--io=<n>] [--io_level=<0|1>]
-  Enter deep sleep mode. Two wakeup modes are supported: timer and GPIO. If no
-  wakeup option is specified, will sleep indefinitely.
-  -t, --time=<t>  Wake up time, ms
-      --io=<n>  If specified, wakeup using GPIO with given number
-  --io_level=<0|1>  GPIO level to trigger wakeup
-
-light_sleep  [-t <t>] [--io=<n>]... [--io_level=<0|1>]...
-  Enter light sleep mode. Two wakeup modes are supported: timer and GPIO. Mult
-  iple GPIO pins can be specified using pairs of 'io' and 'io_level' arguments
-  . Will also wake up on UART input.
-  -t, --time=<t>  Wake up time, ms
-      --io=<n>  If specified, wakeup using GPIO with given number
-  --io_level=<0|1>  GPIO level to trigger wakeup
-
-tasks 
-  Get information about running tasks
-
-nvs_set  <key> <type> -v <value>
-  Set key-value pair in selected namespace.
-Examples:
- nvs_set VarName i32 -v 
-  123 
- nvs_set VarName str -v YourString 
- nvs_set VarName blob -v 0123456789abcdef 
-         <key>  key of the value to be set
-        <type>  type can be: i8, u8, i16, u16 i32, u32 i64, u64, str, blob
-  -v, --value=<value>  value to be stored
-
-nvs_get  <key> <type>
-  Get key-value pair from selected namespace. 
-Example: nvs_get VarName i32
-         <key>  key of the value to be read
-        <type>  type can be: i8, u8, i16, u16 i32, u32 i64, u64, str, blob
-
-nvs_erase  <key>
-  Erase key-value pair from current namespace
-         <key>  key of the value to be erased
-
-nvs_namespace  <namespace>
-  Set current namespace
-   <namespace>  namespace of the partition to be selected
-
-nvs_list  <partition> [-n <namespace>] [-t <type>]
-  List stored key-value pairs stored in NVS.Namespace and type can be specified
-  to print only those key-value pairs.
-  
-Following command list variables stored inside 'nvs' partition, under namespace 'storage' with type uint32_t
-  Example: nvs_list nvs -n storage -t u32 
-
-   <partition>  partition name
-  -n, --namespace=<namespace>  namespace name
-  -t, --type=<type>  type can be: i8, u8, i16, u16 i32, u32 i64, u64, str, blob
-
-nvs_erase_namespace  <namespace>
-  Erases specified namespace
-   <namespace>  namespace to be erased
-
-set_sta  <ssid> <passwd>
-  Set SSID and password of the STA interface
-        <ssid>  SSID
-      <passwd>  Password
-  --, -u, ----username=<ent_username>  Enterprise username
-  --, -a, ----anan=<ent_identity>  Enterprise identity
-
-set_sta_static  <ip> <subnet> <gw>
-  Set Static IP for the STA interface
-          <ip>  IP
-      <subnet>  Subnet Mask
-          <gw>  Gateway Address
-
-set_ap  <ssid> <passwd>
-  Set SSID and password of the SoftAP
-        <ssid>  SSID of AP
-      <passwd>  Password of AP
-
-set_ap_ip  <ip>
-  Set IP for the AP interface
-          <ip>  IP
-
-portmap  [add|del] [TCP|UDP] <ext_portno> <int_ip> <int_portno>
-  Add or delete a portmapping to the router
-     [add|del]  add or delete portmapping
-     [TCP|UDP]  TCP or UDP port
-  <ext_portno>  external port number
-      <int_ip>  internal IP
-  <int_portno>  internal port number
-
-show 
-  Get status and config of the router
-```
-
-If you want to enter non-ASCII or special characters (incl. ' ') you can use HTTP-style hex encoding (e.g. "My%20AccessPoint" results in a string "My AccessPoint").
-
-## Set console output to UART or USB_SERIAL_JTAG (USB-OTG)
-All newer ESP32 boards have a built in [USB Serial/JTAG Controller](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c3/api-guides/usb-serial-jtag-console.html). 
-If the USB port is connected directly to the USB Serial/JTAG Controller, you wont be able to use the console over UART.
+**Last Updated:** May 1, 2026  
+**Status:** In Active Development — Battery Thresholds & State Machine Phase
 
 You can change the console output to USB_SERIAL_JTAG:
 

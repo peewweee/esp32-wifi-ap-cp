@@ -32,27 +32,248 @@ At the thesis level, the full system spans four layers:
 Important repo boundary:
 - This repository currently implements the ESP32 networking/router/captive-portal firmware
 - The Vercel PWA is referenced from this firmware, but its source code is not present here
-- The solar charging electronics, port current sensing, RFID activation logic, and eco-metric calculations described in the thesis framing are not yet implemented in this repository
+- The solar charging electronics, port current sensing, RFID activation logic, and eco-metric calculations described in the thesis framing are partially implemented or planned for implementation in this repository
+
+Last reviewed and updated: 2026-05-01
+- Full codebase analysis completed across all main/ and components/ directories
+- Current implementation status documented with all mismatches identified
+- System requirements vs. actual implementation gaps documented below
 
 ## Project Summary
 
-This repository contains ESP32 firmware for the connectivity subsystem of the Smart Solar Hub thesis project.
+This repository contains ESP32 firmware for the connectivity and control subsystem of the Smart Solar Hub thesis project.
 
 The current firmware combines:
-- A SoftAP that is always exposed to clients
-- An optional STA uplink to another Wi-Fi network
-- IPv4 NAPT and port mapping
-- A captive portal with session-gated internet access
+- A SoftAP that is always exposed to clients (branded as `SOLAR CONNECT`)
+- An optional STA uplink to another Wi-Fi network (for MCU telemetry to Supabase)
+- IPv4 NAPT and port mapping for upstream internet access
+- A captive portal with session-gated internet access and terms acceptance
+- RFID-based physical activation (card presence detection and GPIO control)
+- Port current sensing integration (INA219 sensors, disabled by default)
+- Battery percentage tracking (manual test UI; hardware integration planned)
+- Battery-level-based operational thresholds (NOT YET IMPLEMENTED)
 - A serial CLI for configuration and diagnostics
 - SPIFFS-hosted image assets used by the portal UI
-
-The current user-facing branding is `SOLAR CONNECT`.
+- Supabase integration for session sync, port telemetry, and battery state
 
 Important product-level framing:
 - The current root web experience is a captive portal at `/`
-- The configuration UI still exists, but it now lives at `/config`
-- The repository started from the ESP-IDF console example and an ESP32 NAT router example, then added a custom captive portal flow, diagnostics, Supabase sync, Vercel handoff, and Smart Solar Hub branding
-- In the broader thesis architecture, this repo should be treated as the connectivity and session-management firmware, not as the whole charging-station stack
+- The configuration UI still exists at `/config`
+- The repository started from the ESP-IDF console example and an ESP32 NAT router example, then added a custom captive portal flow, diagnostics, RFID control, port sensors, Supabase sync, Vercel handoff, and Smart Solar Hub branding
+- In the broader thesis architecture, this repo implements the embedded control layer that sits between the power/charging hardware and the cloud dashboard
+
+## Thesis System Requirements
+
+The Smart Solar Hub is designed to enforce operational thresholds based on battery state to maximize solar energy efficiency while maintaining safe charging operations. The system has six key operational modes based on battery percentage and charging/recovery direction.
+
+### Operational Threshold Specification
+
+The system must enforce the following battery-level-based mode transitions:
+
+| Battery % | Trend | Charging Ports | WiFi (Users) | WiFi (MCU Telemetry) | System State |
+|-----------|-------|---|---|---|---|
+| 100% – 26% | Any | ON | ON | ON | Full Service |
+| 25% | Falling | ON | **OFF** | ON | Users WiFi Disabled |
+| 15% | Falling | **OFF** | OFF | ON | Ports Disabled, MCU Telemetry Only |
+| 10% | Falling | OFF | OFF | **OFF** | **Complete Shutdown** |
+| 13% | Recovering | OFF | OFF | **ON** | MCU Wakes, Telemetry Resumes |
+| 20% | Recovering | **ON** | OFF | ON | Charging Ports Resume |
+| 30% | Recovering | ON | **ON** | ON | WiFi Users Resume (Full Service) |
+
+**Key design intent:**
+- RFID card presence enables system activation
+- Battery level determines what functionality is available
+- System gracefully degrades: Users → Ports → Telemetry → Shutdown
+- Asymmetric recovery thresholds (13%, 20%, 30%) prevent battery cycling near critical thresholds
+- MCU telemetry continues until 10% to report final state to Supabase before shutdown
+
+## Current Implementation Status
+
+### ✅ FULLY IMPLEMENTED
+
+1. **RFID Logic**
+   - Card authentication against 2 valid UID list
+   - GPIO control of 6 power pins (4 MOSFETs + SSR + relay) on pins 12, 14, 27, 26, 25, 13
+   - 1-second card presence timeout
+   - **Limitation**: Power pins are controlled directly by RFID without checking battery level
+
+2. **WiFi AP (SoftAP)**
+   - "SOLAR CONNECT" SSID (configurable)
+   - Optional STA uplink for telemetry
+   - DHCP server for AP clients
+   - Max 8 concurrent clients
+
+3. **Captive Portal & Session Management**
+   - Terms and conditions gate at `/` with checkbox acceptance
+   - Session token generation + stable device_hash (MAC-based)
+   - 3600 seconds (1 hour) daily quota per device/MAC
+   - Supabase sync: heartbeat (30s), session state (active/expired/disconnected)
+   - PWA one-time linking via `/confirm` redirect
+
+4. **Port State Tracking**
+   - All 5 ports defined: USB-A 1/2, USB-C 1/2, Outlet
+   - Manual test UI at `/ports` with toggles
+   - INA219 sensor code prepared (disabled: `PORT_SENSORS_ENABLED=0`)
+   - Current threshold: 50mA (configurable) for in_use detection
+   - Sends to Supabase: current_ma, bus_voltage_v, status (available/in_use/fault/offline)
+
+5. **Manual Battery Status (Test UI)**
+   - Slider at `/ports` to simulate battery percentage (0-100)
+   - Sends to Supabase: `station_state.battery_percent`
+   - **Important**: This is manual-only; no hardware ADC reading yet
+
+6. **Supabase Schema & Integration**
+   - `sessions` table: session_token, device_hash, installation_id, remaining_seconds, status
+   - `port_state` table: port_key, status, current_ma, bus_voltage_v
+   - `station_state` table: battery_percent, updated_at
+   - Three RPCs defined: `claim_session_link()`, `resolve_installation_session()`, `cleanup_old_sessions()`
+   - Session heartbeat task + state update queue in http_server.c
+
+### ❌ NOT YET IMPLEMENTED
+
+1. **AC Sensor Reading**
+   - No AC current measurement code
+   - Outlet port exists in schema but only manually settable in test UI
+   - **Required for**: Full port telemetry per thesis design
+
+2. **Battery Percentage Hardware Reading**
+   - No ADC reading from voltage divider
+   - No fuel gauge IC integration (e.g., BMS serial data)
+   - LiFePO4 battery state must be read from hardware
+   - **Current workaround**: Manual slider in test UI only
+   - **Required for**: Operational threshold automation
+
+3. **Battery Operational Thresholds & System State Machine** ⚠️ CRITICAL
+   - **NO** state machine for battery-driven system transitions
+   - **NO** WiFi (Users) disable at 25% falling
+   - **NO** charging port disable at 15% falling
+   - **NO** MCU-only telemetry mode at 15% falling
+   - **NO** system shutdown trigger at 10% falling
+   - **NO** recovery logic for 13%, 20%, 30% thresholds
+   - **Impact**: System cannot degrade gracefully based on battery level
+   - **Required for**: Thesis thesis compliance and energy efficiency
+
+4. **Coordinated Power State Management**
+   - **NO** global system state machine tracking:
+     - card_present (RFID)
+     - battery_percent (hardware input)
+     - system_mode (full service / users disabled / ports disabled / MCU only / shutdown)
+   - **Current behavior**: RFID controls power pins directly, independent of battery
+   - **Problem**: Even at 10% battery, RFID can activate charging ports
+   - **Required for**: Safe hardware operation
+
+### Detailed Feature Gaps
+
+| Feature | Status | Dependency | Thesis Impact |
+|---------|--------|------------|---|
+| AC current sensor | ❌ | Hardware ADC + sensor IC | Incomplete telemetry |
+| Battery ADC reading | ❌ | Voltage divider circuit | Cannot read actual battery state |
+| Battery threshold enforcement | ❌ | Battery reading + state machine | Core thesis feature missing |
+| WiFi mode switching | ❌ | System state machine | Can't restrict to telemetry-only mode |
+| System shutdown trigger | ❌ | Battery threshold + power control | Can't protect battery from over-discharge |
+| Recovery hysteresis | ❌ | System state machine | Can't prevent battery cycling |
+| Power state coordination | ❌ | System state machine + RFID refactor | Cannot enforce battery limits on ports |
+
+## Critical Mismatches: Specification vs. Implementation
+
+### Mismatch 1: Power Control Architecture
+**Specification:** "RFID card presence activates system. Battery thresholds enforce what the system can do."
+**Implementation:** RFID directly controls power pins without checking battery level.
+**Impact:** At 10% battery, RFID can still turn on charging ports → battery damage risk.
+
+### Mismatch 2: WiFi Mode Transitions
+**Specification:** "25% falling: WiFi (Users) disabled. 15% falling: WiFi (MCU telemetry only)."
+**Implementation:** WiFi AP is always active when RFID card is present. No mode switching.
+**Impact:** Users can get WiFi at critically low battery levels. No telemetry-only survival mode.
+
+### Mismatch 3: Graceful Shutdown
+**Specification:** "10% falling: Complete system shutdown. Final telemetry sync before power loss."
+**Implementation:** No shutdown logic. System continues normal operation regardless of battery.
+**Impact:** System cannot prevent LiFePO4 over-discharge damage.
+
+### Mismatch 4: AC Outlet Telemetry
+**Specification:** "Send AC port availability/in-use status to Supabase."
+**Implementation:** Outlet is in port list but no AC current sensor code. Only manual test UI.
+**Impact:** PWA dashboard shows incomplete charging station state.
+
+### Mismatch 5: Battery State Visibility
+**Specification:** "Read and report battery percentage to dashboard."
+**Implementation:** Only manual test slider. No hardware ADC integration.
+**Impact:** Dashboard cannot show real battery state. Manual testing only.
+
+### Mismatch 6: RFID-Battery Coordination
+**Specification:** "RFID physically gates access. Battery level gates functionality. Combined logic."
+**Implementation:** RFID and battery tracking are decoupled. No combined logic.
+**Impact:** No safety override when battery critical. Firmware doesn't enforce thesis design.
+
+## System Architecture: Current vs. Required
+
+### Current Architecture (Incomplete)
+```
+RFID Card Present
+    ↓
+[RFID Module] → GPIO 12,14,27,26,25,13 ON (unconditional)
+    ↓
+Charging Ports Active
+    ↓
+WiFi AP Active (if card present)
+    ↓
+User WiFi Session (1 hour quota)
+    ↓
+Supabase: session tracking + manual port/battery status
+```
+
+### Required Architecture (Full Thesis Implementation)
+```
+RFID Card Present + Battery %
+    ↓
+[System State Machine]
+    ├─ 100%-26%: Full Service (All ON)
+    ├─ 25% Fall: Users WiFi OFF
+    ├─ 15% Fall: Ports OFF, MCU Telemetry ON
+    ├─ 10% Fall: SHUTDOWN
+    ├─ 13% Recov: MCU Telemetry ON
+    ├─ 20% Recov: Ports ON
+    └─ 30% Recov: Users WiFi ON
+    ↓
+[Power Control]
+├─ GPIO control (ports, SSR, relay)
+├─ WiFi AP mode switching (full AP vs. STA-only)
+├─ Session enforcement (Users vs. MCU-only)
+└─ Graceful shutdown sequence
+    ↓
+[Supabase Telemetry]
+├─ Battery %, trending direction
+├─ Port current/voltage (AC + USB)
+├─ System state (mode, reason)
+├─ Final sync before shutdown
+└─ Session state (active/paused/shutdown)
+```
+
+## Implementation Roadmap
+
+**Phase 1: Hardware Integration** (Prerequisites)
+- Implement battery ADC reading from voltage divider
+- Implement AC current sensor (if hardware added)
+- Test hardware inputs before state machine logic
+
+**Phase 2: State Machine Core** (Foundation)
+- Create system_state_manager module
+- Implement battery threshold detection with hysteresis
+- Implement state transitions (falling/recovering)
+- Add state validation and logging
+
+**Phase 3: Power & WiFi Control** (Integration)
+- Refactor RFID to check system state before activating power
+- Implement WiFi mode switching (AP vs. STA-only)
+- Implement graceful shutdown sequence
+- Add Supabase reporting of system state + reason
+
+**Phase 4: Testing & Documentation** (Finalization)
+- Validate all threshold transitions with simulated battery curves
+- Document state machine behavior and recovery procedures
+- Update PWA dashboard to handle new system states
+- Test battery protection limits with hardware
 
 ## Repository Layout
 
