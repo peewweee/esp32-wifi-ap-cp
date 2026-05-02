@@ -27,6 +27,7 @@
 #define RFID_SPI_HOST  SPI3_HOST
 #define RFID_SPI_HZ    (4 * 1000 * 1000)
 
+#if RFID_ENABLED
 /* All 6 power-control pins from the schematic: 4 MOSFETs + SSR + relay.
  * GPIO 12 is a strapping pin (MTDI / flash-voltage select) — we initialize
  * it LOW after boot to match the Arduino sketch. */
@@ -39,6 +40,7 @@ static const uint8_t s_valid_uids[][4] = {
     {0xF3, 0x95, 0xCF, 0x1E},
 };
 #define RFID_NUM_UIDS (sizeof(s_valid_uids) / sizeof(s_valid_uids[0]))
+#endif /* RFID_ENABLED */
 
 #define RFID_PRESENCE_TIMEOUT_MS  1000  /* matches Arduino loop */
 #define RFID_POLL_MS              50    /* fast enough for hold/lift detection */

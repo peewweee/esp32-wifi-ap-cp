@@ -64,6 +64,7 @@ static void fill_not_ready_reading(port_sensor_id_t id, port_sensor_reading_t *o
 
 #include "driver/gpio.h"
 #include "driver/i2c.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "supabase_client.h"
@@ -108,6 +109,10 @@ static bool s_i2c_installed;
 static bool s_sensor_present[PORT_SENSOR_COUNT];
 #if PORT_SENSORS_SUPABASE_SYNC_ENABLED
 static bool s_sync_task_started;
+/* Per-port event-driven sync state. Reset to NOT_READY/0 so the very first
+ * good reading always counts as a status change and gets pushed. */
+static port_sensor_status_t s_last_pushed_status[PORT_SENSOR_COUNT];
+static int64_t s_last_pushed_ts_ms[PORT_SENSOR_COUNT];
 #endif
 
 /* Read SDA/SCL with the I2C driver detached. With internal pull-ups
@@ -365,19 +370,56 @@ static void port_sensors_sync_task(void *pvParameters)
 
     supabase_init();
 
-    const TickType_t delay_ticks =
-        pdMS_TO_TICKS(PORT_SENSORS_SYNC_INTERVAL_MS > 0
-                          ? PORT_SENSORS_SYNC_INTERVAL_MS
-                          : 10000);
+    for (size_t i = 0; i < PORT_SENSOR_COUNT; i++) {
+        s_last_pushed_status[i] = PORT_SENSOR_STATUS_NOT_READY;
+        s_last_pushed_ts_ms[i]  = 0;
+    }
+
+    const TickType_t poll_delay_ticks =
+        pdMS_TO_TICKS(PORT_SENSORS_POLL_INTERVAL_MS > 0
+                          ? PORT_SENSORS_POLL_INTERVAL_MS
+                          : 500);
 
     ESP_LOGI(TAG,
-             "port sensor Supabase sync task started; interval=%d ms threshold=%.1f mA",
-             PORT_SENSORS_SYNC_INTERVAL_MS,
+             "port sensor Supabase sync task started; poll=%d ms heartbeat=%d ms threshold=%.1f mA",
+             PORT_SENSORS_POLL_INTERVAL_MS,
+             PORT_SENSORS_HEARTBEAT_INTERVAL_MS,
              (double)PORT_IN_USE_THRESHOLD_MA);
 
     while (true) {
-        port_sensors_sync_once();
-        vTaskDelay(delay_ticks);
+        port_sensor_reading_t readings[PORT_SENSOR_COUNT];
+        port_sensors_read_all(readings);
+
+        const int64_t now_ms = esp_timer_get_time() / 1000;
+
+        for (size_t i = 0; i < PORT_SENSOR_COUNT; i++) {
+            if (!s_sensor_present[i]) {
+                continue;
+            }
+            if (readings[i].status != PORT_SENSOR_STATUS_AVAILABLE &&
+                readings[i].status != PORT_SENSOR_STATUS_IN_USE) {
+                continue;
+            }
+
+            const bool changed =
+                (readings[i].status != s_last_pushed_status[i]);
+            const bool heartbeat_due =
+                (now_ms - s_last_pushed_ts_ms[i]) >=
+                PORT_SENSORS_HEARTBEAT_INTERVAL_MS;
+
+            if (!changed && !heartbeat_due) {
+                continue;
+            }
+
+            esp_err_t err = sync_reading_to_supabase(&readings[i]);
+            if (err == ESP_OK) {
+                s_last_pushed_status[i] = readings[i].status;
+                s_last_pushed_ts_ms[i]  = now_ms;
+            }
+            /* On failure leave last_pushed_* alone so the next poll retries. */
+        }
+
+        vTaskDelay(poll_delay_ticks);
     }
 }
 #endif
@@ -599,7 +641,15 @@ esp_err_t port_sensors_sync_once(void)
     esp_err_t first_err = port_sensors_read_all(readings);
 
     for (size_t i = 0; i < PORT_SENSOR_COUNT; i++) {
-        if (readings[i].status == PORT_SENSOR_STATUS_NOT_READY) {
+        /* Only push real availability signals: AVAILABLE or IN_USE.
+         * Skip ports whose INA219 wasn't detected at boot, ports that
+         * read FAULT, and anything still NOT_READY — none of those
+         * should overwrite a healthy row in Supabase. */
+        if (!s_sensor_present[i]) {
+            continue;
+        }
+        if (readings[i].status != PORT_SENSOR_STATUS_AVAILABLE &&
+            readings[i].status != PORT_SENSOR_STATUS_IN_USE) {
             continue;
         }
 

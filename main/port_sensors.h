@@ -41,8 +41,22 @@ extern "C" {
 #define PORT_SENSORS_SUPABASE_SYNC_ENABLED 0
 #endif
 
-#ifndef PORT_SENSORS_SYNC_INTERVAL_MS
-#define PORT_SENSORS_SYNC_INTERVAL_MS 10000
+/* Event-driven sync timing.
+ *
+ * The sync task polls the INA219s at PORT_SENSORS_POLL_INTERVAL_MS and only
+ * pushes a row to Supabase when:
+ *   1. The port's status flipped (available <-> in_use), or
+ *   2. PORT_SENSORS_HEARTBEAT_INTERVAL_MS elapsed since the last successful
+ *      push for that port (so the dashboard knows the device is alive).
+ *
+ * Plug/unplug latency on the dashboard is bounded by POLL + one HTTP round
+ * trip (~200-500 ms TLS upsert), so ~1 second worst case at default values. */
+#ifndef PORT_SENSORS_POLL_INTERVAL_MS
+#define PORT_SENSORS_POLL_INTERVAL_MS 500
+#endif
+
+#ifndef PORT_SENSORS_HEARTBEAT_INTERVAL_MS
+#define PORT_SENSORS_HEARTBEAT_INTERVAL_MS 30000
 #endif
 
 #ifndef PORT_SENSORS_SYNC_STACK_BYTES
@@ -53,20 +67,19 @@ extern "C" {
  * Clock kept at 100 kHz because the PCB pulls SDA/SCL up to 5 V via the
  * INA219 boards (their VCC is on a 5 V rail). The ESP32's internal clamp
  * diodes hold the line near 3.6-4 V at the cost of slow edges, so we run
- * standard-mode 100 kHz instead of fast-mode 400 kHz.
- *
- * SCL is on GPIO 32 (not the PCB-routed GPIO 22) because the etched SCL
- * trace from GPIO 22 is shorted to GND somewhere on the board. We bypass
- * it with a fly wire from GPIO 32 to one of the INA219 SCL pads. GPIO 22
- * is left unconfigured. */
+ * standard-mode 100 kHz instead of fast-mode 400 kHz. */
 #define PORT_SENSORS_I2C_PIN_SDA   21
-#define PORT_SENSORS_I2C_PIN_SCL   32
+#define PORT_SENSORS_I2C_PIN_SCL   22
 #define PORT_SENSORS_I2C_FREQ_HZ   100000
 
-/* INA219 7-bit addresses per port. Each physical module must be unique. */
-#define PORT_SENSORS_INA219_ADDR_USB_C_1   0x40
+/* INA219 7-bit addresses per port. Each physical module must be unique.
+ * USB-C 1 and USB-A 1 modules were physically swapped on the PCB — the chip
+ * with A0/A1 jumpers set to 0x44 now sits on the USB-C 1 footprint, and the
+ * chip jumpered to 0x40 sits on USB-A 1. Keep these values aligned with the
+ * actual silkscreened address of whichever board is in each socket. */
+#define PORT_SENSORS_INA219_ADDR_USB_C_1   0x44
 #define PORT_SENSORS_INA219_ADDR_USB_C_2   0x41
-#define PORT_SENSORS_INA219_ADDR_USB_A_1   0x44
+#define PORT_SENSORS_INA219_ADDR_USB_A_1   0x40
 #define PORT_SENSORS_INA219_ADDR_USB_A_2   0x45
 
 /* MOSFET GPIOs recorded for future station_power work. Not driven here. */

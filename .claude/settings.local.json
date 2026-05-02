@@ -17,7 +17,13 @@
       "Bash(\"C:\\\\Espressif\\\\python_env\\\\idf5.3_py3.13_env\\\\Scripts\\\\python.exe\" \"C:\\\\Users\\\\Phoebe Rhone Gangoso\\\\AppData\\\\Local\\\\Temp\\\\serial\\\\capture.py\")",
       "Read(//c/Users/Phoebe Rhone Gangoso/AppData/Local/Temp/serial/**)",
       "Bash(\"C:\\\\Espressif\\\\python_env\\\\idf5.3_py3.13_env\\\\Scripts\\\\python.exe\" -c \"data = open\\(r'C:\\\\Users\\\\Phoebe Rhone Gangoso\\\\AppData\\\\Local\\\\Temp\\\\serial\\\\serial.log','rb'\\).read\\(\\); import re; clean = re.sub\\(rb'\\\\x1b\\\\[[0-9;]*m', b'', data\\); sys.stdout.buffer.write\\(clean\\) if False else print\\(clean.decode\\('utf-8','replace'\\)\\)\")",
-      "Bash(C:\\\\Espressif\\\\python_env\\\\idf5.3_py3.13_env\\\\Scripts\\\\python.exe *)"
+      "Bash(C:\\\\Espressif\\\\python_env\\\\idf5.3_py3.13_env\\\\Scripts\\\\python.exe *)",
+      "PowerShell(& 'C:\\\\Espressif\\\\frameworks\\\\esp-idf-v5.3.1\\\\export.ps1'; idf.py build)",
+      "PowerShell(& 'C:\\\\Espressif\\\\frameworks\\\\esp-idf-v5.3.1\\\\export.ps1'; idf.py -p COM5 flash)",
+      "PowerShell(& 'C:\\\\cp\\\\esp32-wifi-ap-cp\\\\read_boot.ps1' -Seconds 20)",
+      "PowerShell(& 'C:\\\\cp\\\\esp32-wifi-ap-cp\\\\read_boot.ps1' -Seconds 6)",
+      "PowerShell(& 'C:\\\\cp\\\\esp32-wifi-ap-cp\\\\read_boot.ps1' -Seconds 7)",
+      "PowerShell(& 'C:\\\\cp\\\\esp32-wifi-ap-cp\\\\read_boot.ps1' -Seconds 8)"
     ],
     "additionalDirectories": [
       "C:\\Users\\Phoebe Rhone Gangoso\\Downloads\\solar-powered-charging-station-pwa",
