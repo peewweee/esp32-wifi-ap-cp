@@ -1,4 +1,4 @@
-idf_component_register(SRCS "pzem_reader.c" "lwip_hooks.c"
+idf_component_register(SRCS "battery_sensor.c" "pzem_reader.c" "lwip_hooks.c"
                             "client_acl.c"
                             "eco_metrics.c"
                             "port_sensors.c"
@@ -17,6 +17,7 @@ idf_component_register(SRCS "pzem_reader.c" "lwip_hooks.c"
                                   esp_event
                                   esp_netif
                                   esp_timer
+                                  esp_adc
                                   nvs_flash
                                   console
                                   driver

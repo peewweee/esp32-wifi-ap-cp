@@ -1,9 +1,11 @@
 #include "dns_server.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "freertos/FreeRTOS.h"
@@ -11,6 +13,7 @@
 
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
@@ -22,13 +25,153 @@
 #define DNS_BUFFER_SIZE 512
 #define DNS_TASK_STACK_SIZE 4096
 #define DNS_TASK_PRIORITY 5
-#define DNS_TIMEOUT_MS 2000
+#define DNS_TIMEOUT_MS 800
 #define DNS_TTL_SECONDS 60
 #define DEFAULT_UPSTREAM_DNS "8.8.8.8"
 #define SECONDARY_UPSTREAM_DNS "1.1.1.1"
 
+/* In-RAM DNS cache. Holds only responses successfully forwarded upstream
+ * for already-authenticated clients. Unauthenticated queries get the
+ * captive-portal hijack and never touch the cache, so per-device
+ * isolation is unaffected. Entries expire at the next UTC midnight,
+ * aligning with the daily quota reset in http_server.c. */
+#define DNS_CACHE_ENTRIES   64
+#define DNS_CACHE_FALLBACK_TTL_US (12LL * 60LL * 60LL * 1000000LL) /* 12 h, used before NTP syncs */
+
+typedef struct {
+    char     qname[96];
+    uint16_t qtype;
+    size_t   response_len;
+    uint8_t  response[DNS_BUFFER_SIZE];
+    int64_t  expires_us;
+    bool     valid;
+} dns_cache_entry_t;
+
+static dns_cache_entry_t s_dns_cache[DNS_CACHE_ENTRIES];
+
 static const char *TAG = "DNS_SERVER";
 static TaskHandle_t s_dns_task_handle;
+
+/* Returns wall-clock seconds until the next UTC midnight if NTP has
+ * synced, else 0 (caller should fall back to a fixed TTL). */
+static int dns_seconds_until_next_day(void)
+{
+    time_t now = time(NULL);
+    if (now < 24 * 3600) {
+        return 0;  /* clock not set yet */
+    }
+    time_t next_day = ((now / 86400) + 1) * 86400;
+    return (int)(next_day - now);
+}
+
+static int64_t dns_cache_ttl_us(void)
+{
+    int secs = dns_seconds_until_next_day();
+    if (secs <= 0) {
+        return DNS_CACHE_FALLBACK_TTL_US;
+    }
+    return (int64_t)secs * 1000000LL;
+}
+
+static void dns_cache_normalize_qname(char *qname)
+{
+    for (char *p = qname; *p; p++) {
+        *p = (char)tolower((unsigned char)*p);
+    }
+}
+
+/* Lookup. Returns NULL on miss. */
+static dns_cache_entry_t *dns_cache_lookup(const char *qname, uint16_t qtype)
+{
+    int64_t now = esp_timer_get_time();
+    for (int i = 0; i < DNS_CACHE_ENTRIES; i++) {
+        dns_cache_entry_t *e = &s_dns_cache[i];
+        if (!e->valid) {
+            continue;
+        }
+        if (e->expires_us <= now) {
+            e->valid = false;
+            continue;
+        }
+        if (e->qtype == qtype && strcmp(e->qname, qname) == 0) {
+            return e;
+        }
+    }
+    return NULL;
+}
+
+/* Insert (or replace) a successful response into the cache.
+ * Picks an empty slot if available, otherwise evicts the oldest entry. */
+static void dns_cache_insert(const char *qname, uint16_t qtype,
+                             const uint8_t *response, size_t response_len)
+{
+    if (response_len == 0 || response_len > DNS_BUFFER_SIZE) {
+        return;
+    }
+
+    int slot = -1;
+    int64_t oldest_expires = INT64_MAX;
+    for (int i = 0; i < DNS_CACHE_ENTRIES; i++) {
+        dns_cache_entry_t *e = &s_dns_cache[i];
+        if (!e->valid) {
+            slot = i;
+            break;
+        }
+        if (e->qtype == qtype && strcmp(e->qname, qname) == 0) {
+            slot = i;  /* refresh existing entry */
+            break;
+        }
+        if (e->expires_us < oldest_expires) {
+            oldest_expires = e->expires_us;
+            slot = i;
+        }
+    }
+    if (slot < 0) {
+        slot = 0;
+    }
+
+    dns_cache_entry_t *e = &s_dns_cache[slot];
+    strncpy(e->qname, qname, sizeof(e->qname) - 1);
+    e->qname[sizeof(e->qname) - 1] = '\0';
+    e->qtype = qtype;
+    memcpy(e->response, response, response_len);
+    e->response_len = response_len;
+    e->expires_us = esp_timer_get_time() + dns_cache_ttl_us();
+    e->valid = true;
+}
+
+/* Build a response from a cached entry, copying the cached bytes and
+ * patching the transaction ID from the live query so the client matches
+ * the answer to its in-flight request. */
+static ssize_t dns_cache_build_response(const dns_cache_entry_t *entry,
+                                        const uint8_t *query,
+                                        uint8_t *response,
+                                        size_t response_size)
+{
+    if (entry->response_len > response_size) {
+        return -1;
+    }
+    memcpy(response, entry->response, entry->response_len);
+    response[0] = query[0];
+    response[1] = query[1];
+    return (ssize_t)entry->response_len;
+}
+
+/* Only positive (RCODE 0) responses are worth caching. NXDOMAIN can
+ * change between days and we'd rather re-ask than serve a stale "no
+ * such host". */
+static bool dns_response_is_cacheable(const uint8_t *response, size_t response_len)
+{
+    if (response_len < 12) {
+        return false;
+    }
+    uint8_t rcode = response[3] & 0x0F;
+    if (rcode != 0) {
+        return false;
+    }
+    uint16_t ancount = ((uint16_t)response[6] << 8) | response[7];
+    return ancount > 0;
+}
 
 static size_t dns_skip_name(const uint8_t *packet, size_t packet_len, size_t offset)
 {
@@ -237,7 +380,7 @@ static bool forward_dns_query_to_server(const struct sockaddr_in *upstream_addr,
     }
 
     if (getsockname(upstream_sock, (struct sockaddr *)&local_addr, &local_addr_len) == 0) {
-        ESP_LOGI(TAG, "Upstream DNS socket local endpoint " IPSTR ":%u",
+        ESP_LOGD(TAG, "upstream DNS local endpoint " IPSTR ":%u",
                  IP2STR((const ip4_addr_t *)&local_addr.sin_addr.s_addr), ntohs(local_addr.sin_port));
     }
 
@@ -257,7 +400,7 @@ static bool forward_dns_query_to_server(const struct sockaddr_in *upstream_addr,
         return false;
     }
 
-    ESP_LOGI(TAG, "Received %d-byte DNS response from " IPSTR,
+    ESP_LOGD(TAG, "got %d-byte DNS response from " IPSTR,
              (int)*response_len,
              IP2STR((const ip4_addr_t *)&upstream_addr->sin_addr.s_addr));
 
@@ -270,7 +413,7 @@ static bool forward_dns_query(const uint8_t *query, size_t query_len, uint8_t *r
     struct sockaddr_in fallback_addr;
 
     if (get_upstream_dns_addr(&upstream_addr)) {
-        ESP_LOGI(TAG, "Forwarding DNS query to upstream " IPSTR,
+        ESP_LOGD(TAG, "forwarding DNS to upstream " IPSTR,
                  IP2STR((const ip4_addr_t *)&upstream_addr.sin_addr.s_addr));
         if (forward_dns_query_to_server(&upstream_addr, query, query_len, response, response_len)) {
             return true;
@@ -279,7 +422,7 @@ static bool forward_dns_query(const uint8_t *query, size_t query_len, uint8_t *r
 
     if (fill_dns_addr(DEFAULT_UPSTREAM_DNS, &fallback_addr) &&
         fallback_addr.sin_addr.s_addr != upstream_addr.sin_addr.s_addr) {
-        ESP_LOGI(TAG, "Retrying DNS query via fallback %s", DEFAULT_UPSTREAM_DNS);
+        ESP_LOGD(TAG, "retrying DNS via fallback %s", DEFAULT_UPSTREAM_DNS);
         if (forward_dns_query_to_server(&fallback_addr, query, query_len, response, response_len)) {
             return true;
         }
@@ -287,7 +430,7 @@ static bool forward_dns_query(const uint8_t *query, size_t query_len, uint8_t *r
 
     if (fill_dns_addr(SECONDARY_UPSTREAM_DNS, &fallback_addr) &&
         fallback_addr.sin_addr.s_addr != upstream_addr.sin_addr.s_addr) {
-        ESP_LOGI(TAG, "Retrying DNS query via fallback %s", SECONDARY_UPSTREAM_DNS);
+        ESP_LOGD(TAG, "retrying DNS via fallback %s", SECONDARY_UPSTREAM_DNS);
         if (forward_dns_query_to_server(&fallback_addr, query, query_len, response, response_len)) {
             return true;
         }
@@ -347,13 +490,23 @@ static void dns_server_task(void *arg)
 
         authenticated = is_client_session_active(client_addr.sin_addr.s_addr);
         dns_get_question_info(query, (size_t)query_len, qname, sizeof(qname), &qtype);
+        dns_cache_normalize_qname(qname);
 
         if (authenticated) {
-            ESP_LOGI(TAG, "Authenticated DNS query from " IPSTR " qtype=%u name=%s",
+            ESP_LOGD(TAG, "auth DNS from " IPSTR " qtype=%u name=%s",
                      IP2STR((ip4_addr_t *)&client_addr.sin_addr.s_addr),
-                     qtype,
-                     qname);
-            if (!forward_dns_query(query, (size_t)query_len, response, &response_len)) {
+                     qtype, qname);
+
+            dns_cache_entry_t *hit = dns_cache_lookup(qname, qtype);
+            if (hit != NULL) {
+                response_len = dns_cache_build_response(hit, query, response, sizeof(response));
+                ESP_LOGD(TAG, "cache hit for %s qtype=%u", qname, qtype);
+            } else if (forward_dns_query(query, (size_t)query_len, response, &response_len)) {
+                if (response_len > 0 &&
+                    dns_response_is_cacheable(response, (size_t)response_len)) {
+                    dns_cache_insert(qname, qtype, response, (size_t)response_len);
+                }
+            } else {
                 ESP_LOGW(TAG, "All upstream DNS attempts failed for client " IPSTR,
                          IP2STR((ip4_addr_t *)&client_addr.sin_addr.s_addr));
                 net_diag_log_snapshot("dns_forward_failed");
@@ -361,10 +514,9 @@ static void dns_server_task(void *arg)
                 response_len = build_dns_servfail_response(query, (size_t)query_len, response, sizeof(response));
             }
         } else {
-            ESP_LOGI(TAG, "Captive DNS response for unauthenticated client " IPSTR " qtype=%u name=%s",
+            ESP_LOGD(TAG, "captive DNS to unauth " IPSTR " qtype=%u name=%s",
                      IP2STR((ip4_addr_t *)&client_addr.sin_addr.s_addr),
-                     qtype,
-                     qname);
+                     qtype, qname);
             response_len = build_dns_response(
                 query,
                 (size_t)query_len,

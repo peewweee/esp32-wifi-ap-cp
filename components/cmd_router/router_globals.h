@@ -61,6 +61,7 @@ esp_err_t add_portmap(uint8_t proto, uint16_t mport, uint32_t daddr, uint16_t dp
 esp_err_t del_portmap(uint8_t proto, uint16_t mport);
 void handle_client_connect(const uint8_t mac[6]);
 void handle_client_disconnect(const uint8_t mac[6]);
+void handle_client_ip_assigned(const uint8_t mac[6], uint32_t ip_net);
 
 #ifdef __cplusplus
 }

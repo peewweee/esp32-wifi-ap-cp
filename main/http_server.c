@@ -1080,6 +1080,52 @@ void handle_client_connect(const uint8_t mac[6])
                                   SUPABASE_UPDATE_ACTIVE);
 }
 
+/* Called from the Wi-Fi event handler when a phone's DHCP lease lands.
+ * If we already have an active session for this MAC (e.g. the phone had
+ * authenticated earlier today, disconnected, and is now back), bind the
+ * session to its newly assigned IP and add it to the ACL. That way the
+ * captive portal does NOT pop up again on reconnect within the same day,
+ * and no new Supabase row gets created — the original 60-min countdown
+ * keeps ticking.
+ *
+ * If no matching session exists, this is a no-op and the phone goes
+ * through the normal captive portal flow. */
+void handle_client_ip_assigned(const uint8_t mac[6], uint32_t ip_net)
+{
+    if (mac == NULL || mac_is_zero(mac) || ip_net == 0) {
+        return;
+    }
+
+    int64_t now = esp_timer_get_time();
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (!sessions[i].active) {
+            continue;
+        }
+        if (memcmp(sessions[i].mac, mac, 6) != 0) {
+            continue;
+        }
+        if (sessions[i].end_time <= now) {
+            continue;
+        }
+
+        if (sessions[i].ip_addr != ip_net) {
+            if (sessions[i].ip_addr != 0) {
+                client_acl_revoke_by_ip(sessions[i].ip_addr);
+            }
+            ESP_LOGI(TAG_WEB,
+                     "IP assigned: rebinding existing session (MAC %02x:%02x:%02x:%02x:%02x:%02x) to IP " IPSTR,
+                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+                     ((uint8_t *)&ip_net)[0], ((uint8_t *)&ip_net)[1],
+                     ((uint8_t *)&ip_net)[2], ((uint8_t *)&ip_net)[3]);
+            sessions[i].ip_addr = ip_net;
+        }
+        sessions[i].admitted = true;
+        client_acl_admit(ip_net, mac);
+        refresh_portal_auth_state("ip_assigned_resume");
+        return;
+    }
+}
+
 void handle_client_disconnect(const uint8_t mac[6])
 {
     bool matched = false;

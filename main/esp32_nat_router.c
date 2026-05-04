@@ -45,6 +45,7 @@
 #include "port_sensors.h"
 #include "rfid_reader.h"
 #include "pzem_reader.h"
+#include "battery_sensor.h"
 
 #if !IP_NAPT
 #error "IP_NAPT must be defined"
@@ -427,6 +428,15 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         handle_client_connect(event->mac);
         net_diag_log_snapshot("ap_client_connected");
     }
+    else if (event_base == IP_EVENT && event_id == IP_EVENT_AP_STAIPASSIGNED)
+    {
+        ip_event_ap_staipassigned_t* event = (ip_event_ap_staipassigned_t*) event_data;
+        ESP_LOGI(TAG, "AP client got IP " IPSTR " (MAC %02x:%02x:%02x:%02x:%02x:%02x)",
+                 IP2STR(&event->ip),
+                 event->mac[0], event->mac[1], event->mac[2],
+                 event->mac[3], event->mac[4], event->mac[5]);
+        handle_client_ip_assigned(event->mac, event->ip.addr);
+    }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED)
     {
         wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
@@ -486,7 +496,7 @@ void wifi_init(const uint8_t* mac, const char* ssid, const char* ent_username, c
                                                         NULL,
                                                         &instance_any_id));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
-                                                        IP_EVENT_STA_GOT_IP,
+                                                        ESP_EVENT_ANY_ID,
                                                         &wifi_event_handler,
                                                         NULL,
                                                         &instance_got_ip));
@@ -668,6 +678,11 @@ void app_main(void)
     esp_err_t pzem_err = pzem_reader_start();
     if (pzem_err != ESP_OK) {
         ESP_LOGW(TAG, "PZEM reader start failed: %s", esp_err_to_name(pzem_err));
+    }
+
+    esp_err_t battery_err = battery_sensor_start();
+    if (battery_err != ESP_OK) {
+        ESP_LOGW(TAG, "Battery sensor start failed: %s", esp_err_to_name(battery_err));
     }
 
     net_diag_start_task();
