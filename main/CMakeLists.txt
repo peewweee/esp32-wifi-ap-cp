@@ -1,4 +1,4 @@
-idf_component_register(SRCS "lwip_hooks.c"
+idf_component_register(SRCS "pzem_reader.c" "lwip_hooks.c"
                             "client_acl.c"
                             "eco_metrics.c"
                             "port_sensors.c"

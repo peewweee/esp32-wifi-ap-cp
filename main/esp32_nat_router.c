@@ -44,6 +44,7 @@
 #include "net_diag.h"
 #include "port_sensors.h"
 #include "rfid_reader.h"
+#include "pzem_reader.h"
 
 #if !IP_NAPT
 #error "IP_NAPT must be defined"
@@ -662,6 +663,11 @@ void app_main(void)
     esp_err_t rfid_err = rfid_reader_start();
     if (rfid_err != ESP_OK) {
         ESP_LOGW(TAG, "RFID reader start failed: %s", esp_err_to_name(rfid_err));
+    }
+
+    esp_err_t pzem_err = pzem_reader_start();
+    if (pzem_err != ESP_OK) {
+        ESP_LOGW(TAG, "PZEM reader start failed: %s", esp_err_to_name(pzem_err));
     }
 
     net_diag_start_task();
