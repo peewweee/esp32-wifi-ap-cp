@@ -7,6 +7,7 @@
 #include "supabase_client.h"
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 static const char *TAG = "pzem";
 
@@ -135,22 +136,56 @@ static esp_err_t pzem_v3_read(pzem_reading_t *out)
     return ESP_OK;
 }
 
+/* PZEM v3's ac_energy_wh is a non-resettable cumulative counter (since the
+ * module's last factory reset). Snapshot its value at the first read of
+ * each UTC day; "today's" energy is the delta against that snapshot. */
+static uint32_t s_energy_wh_at_midnight = 0;
+static int      s_pzem_utc_day_anchor   = -1;
+static bool     s_pzem_anchor_valid     = false;
+
+static uint32_t energy_wh_today(uint32_t cumulative)
+{
+    time_t now = time(NULL);
+    int day_now = (int)(now / 86400);
+    if (day_now != s_pzem_utc_day_anchor) {
+        if (s_pzem_anchor_valid) {
+            ESP_LOGI(TAG,
+                     "UTC midnight: snapshotting AC energy %u Wh (was day %d, now %d)",
+                     (unsigned)cumulative, s_pzem_utc_day_anchor, day_now);
+        }
+        s_energy_wh_at_midnight = cumulative;
+        s_pzem_utc_day_anchor   = day_now;
+        s_pzem_anchor_valid     = true;
+    }
+    /* Defensive: if the meter was reset externally (counter went down),
+     * re-anchor and report 0 today instead of a huge wraparound. */
+    if (cumulative < s_energy_wh_at_midnight) {
+        s_energy_wh_at_midnight = cumulative;
+        return 0;
+    }
+    return cumulative - s_energy_wh_at_midnight;
+}
+
 /* Upsert AC voltage / current / power / energy onto the existing
- * station_state row. The four ac_* columns must exist in Supabase or
+ * station_state row. The five ac_* columns must exist in Supabase or
  * PostgREST will reject the request with HTTP 400. */
 static void pzem_sync_station_state(const pzem_reading_t *r)
 {
-    char payload[256];
+    uint32_t today_wh = energy_wh_today(r->energy_wh);
+
+    char payload[320];
     snprintf(payload, sizeof(payload),
              "{\"station_id\":\"" PZEM_STATION_ID
              "\",\"ac_voltage_v\":%.1f"
              ",\"ac_current_a\":%.3f"
              ",\"ac_power_w\":%.1f"
-             ",\"ac_energy_wh\":%u}",
+             ",\"ac_energy_wh\":%u"
+             ",\"ac_energy_wh_today\":%u}",
              (double)r->voltage_v,
              (double)r->current_a,
              (double)r->power_w,
-             (unsigned)r->energy_wh);
+             (unsigned)r->energy_wh,
+             (unsigned)today_wh);
     esp_err_t err = supabase_post_upsert(
         "/rest/v1/station_state?on_conflict=station_id", payload);
     if (err != ESP_OK) {

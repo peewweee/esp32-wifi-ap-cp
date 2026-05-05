@@ -84,6 +84,7 @@ create table if not exists public.port_state (
         check (status in ('available','in_use','fault','offline')),
     current_ma  numeric,
     bus_voltage_v numeric,
+    daily_in_use_seconds integer default 0,
     updated_at  timestamptz not null default now(),
     unique (station_id, port_key)
 );
@@ -101,11 +102,12 @@ create table if not exists public.station_state (
     battery_voltage_v numeric,
     battery_raw_mv    integer,
     battery_state     text,
-    ac_voltage_v      numeric,
-    ac_current_a      numeric,
-    ac_power_w        numeric,
-    ac_energy_wh      integer,
-    updated_at        timestamptz not null default now()
+    ac_voltage_v       numeric,
+    ac_current_a       numeric,
+    ac_power_w         numeric,
+    ac_energy_wh       integer,
+    ac_energy_wh_today integer default 0,
+    updated_at         timestamptz not null default now()
 );
 
 -- ----------------------------------------------------------------------------

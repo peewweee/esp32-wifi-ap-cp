@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 static const char *TAG = "port_sensors";
 
@@ -113,6 +114,14 @@ static bool s_sync_task_started;
  * good reading always counts as a status change and gets pushed. */
 static port_sensor_status_t s_last_pushed_status[PORT_SENSOR_COUNT];
 static int64_t s_last_pushed_ts_ms[PORT_SENSOR_COUNT];
+
+/* Per-port "seconds in_use today" accumulator. Used by the dashboard to
+ * estimate energy delivered per port (Pavg × hours_in_use). Reset at UTC
+ * midnight to match the dashboard's "today" boundary. Lives in RAM only —
+ * an ESP32 reboot mid-day will reset to 0; documented as a known limit. */
+static uint32_t s_daily_in_use_seconds[PORT_SENSOR_COUNT];
+static int64_t  s_last_accum_ts_ms[PORT_SENSOR_COUNT];
+static int      s_utc_day_anchor = -1;   /* epoch_days of the active day */
 #endif
 
 /* Read SDA/SCL with the I2C driver detached. With internal pull-ups
@@ -320,9 +329,10 @@ static void log_reading(const port_sensor_reading_t *reading)
              port_sensors_status_string(reading->status));
 }
 
-static esp_err_t sync_reading_to_supabase(const port_sensor_reading_t *reading)
+static esp_err_t sync_reading_to_supabase(const port_sensor_reading_t *reading,
+                                          uint32_t daily_in_use_seconds)
 {
-    char payload[192];
+    char payload[224];
     const char *status;
 
     if (reading == NULL || reading->port_key == NULL) {
@@ -337,9 +347,11 @@ static esp_err_t sync_reading_to_supabase(const port_sensor_reading_t *reading)
     snprintf(payload,
              sizeof(payload),
              "{\"station_id\":\"" PORT_SENSORS_STATION_ID
-             "\",\"port_key\":\"%s\",\"status\":\"%s\"}",
+             "\",\"port_key\":\"%s\",\"status\":\"%s\""
+             ",\"daily_in_use_seconds\":%u}",
              reading->port_key,
-             status);
+             status,
+             (unsigned)daily_in_use_seconds);
 
     ESP_LOGI(TAG,
              "Supabase port_state sync: %s status=%s current=%.1f mA",
@@ -364,6 +376,30 @@ static esp_err_t sync_reading_to_supabase(const port_sensor_reading_t *reading)
 }
 
 #if PORT_SENSORS_SUPABASE_SYNC_ENABLED
+/* Roll the daily counters over at UTC midnight. time(NULL) is wall-clock
+ * UTC seconds once SNTP has synced; for the first ~5 s after boot it can
+ * still be in 1970, in which case epoch_days is 0 — close enough not to
+ * matter (we'll pick up the real day on the next sync). */
+static void update_daily_anchor_and_maybe_reset(void)
+{
+    time_t now = time(NULL);
+    int day_now = (int)(now / 86400);
+    if (day_now == s_utc_day_anchor) {
+        return;
+    }
+    if (s_utc_day_anchor < 0) {
+        ESP_LOGI(TAG, "daily counters anchored to UTC day %d", day_now);
+    } else {
+        ESP_LOGI(TAG,
+                 "UTC midnight rollover: %d -> %d, resetting per-port in_use seconds",
+                 s_utc_day_anchor, day_now);
+        for (size_t i = 0; i < PORT_SENSOR_COUNT; i++) {
+            s_daily_in_use_seconds[i] = 0;
+        }
+    }
+    s_utc_day_anchor = day_now;
+}
+
 static void port_sensors_sync_task(void *pvParameters)
 {
     (void)pvParameters;
@@ -371,8 +407,10 @@ static void port_sensors_sync_task(void *pvParameters)
     supabase_init();
 
     for (size_t i = 0; i < PORT_SENSOR_COUNT; i++) {
-        s_last_pushed_status[i] = PORT_SENSOR_STATUS_NOT_READY;
-        s_last_pushed_ts_ms[i]  = 0;
+        s_last_pushed_status[i]  = PORT_SENSOR_STATUS_NOT_READY;
+        s_last_pushed_ts_ms[i]   = 0;
+        s_daily_in_use_seconds[i] = 0;
+        s_last_accum_ts_ms[i]    = 0;
     }
 
     const TickType_t poll_delay_ticks =
@@ -391,6 +429,7 @@ static void port_sensors_sync_task(void *pvParameters)
         port_sensors_read_all(readings);
 
         const int64_t now_ms = esp_timer_get_time() / 1000;
+        update_daily_anchor_and_maybe_reset();
 
         for (size_t i = 0; i < PORT_SENSOR_COUNT; i++) {
             if (!s_sensor_present[i]) {
@@ -400,6 +439,18 @@ static void port_sensors_sync_task(void *pvParameters)
                 readings[i].status != PORT_SENSOR_STATUS_IN_USE) {
                 continue;
             }
+
+            /* Accumulate elapsed seconds while the port is in_use. dt is
+             * computed from the previous poll's timestamp so a varying
+             * poll interval (or a missed cycle) doesn't bias the total. */
+            if (readings[i].status == PORT_SENSOR_STATUS_IN_USE &&
+                s_last_accum_ts_ms[i] != 0) {
+                int64_t dt_ms = now_ms - s_last_accum_ts_ms[i];
+                if (dt_ms > 0 && dt_ms < 60000) {
+                    s_daily_in_use_seconds[i] += (uint32_t)(dt_ms / 1000);
+                }
+            }
+            s_last_accum_ts_ms[i] = now_ms;
 
             const bool changed =
                 (readings[i].status != s_last_pushed_status[i]);
@@ -411,7 +462,8 @@ static void port_sensors_sync_task(void *pvParameters)
                 continue;
             }
 
-            esp_err_t err = sync_reading_to_supabase(&readings[i]);
+            esp_err_t err = sync_reading_to_supabase(&readings[i],
+                                                     s_daily_in_use_seconds[i]);
             if (err == ESP_OK) {
                 s_last_pushed_status[i] = readings[i].status;
                 s_last_pushed_ts_ms[i]  = now_ms;
@@ -653,7 +705,16 @@ esp_err_t port_sensors_sync_once(void)
             continue;
         }
 
-        esp_err_t err = sync_reading_to_supabase(&readings[i]);
+        /* Manual one-shot from the admin /ports test UI: emit the current
+         * accumulator value, so it doesn't overwrite the real counter
+         * with 0 when SYNC_ENABLED is on. When SYNC_ENABLED is off the
+         * counter stays at 0 and that's fine. */
+#if PORT_SENSORS_SUPABASE_SYNC_ENABLED
+        uint32_t seconds = s_daily_in_use_seconds[i];
+#else
+        uint32_t seconds = 0;
+#endif
+        esp_err_t err = sync_reading_to_supabase(&readings[i], seconds);
         if (err != ESP_OK && first_err == ESP_OK) {
             first_err = err;
         }
