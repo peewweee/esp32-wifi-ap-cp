@@ -451,6 +451,32 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
+/* Enable or disable the user-facing AP (the SoftAP that phones connect to
+ * for the captive portal). The STA side stays up either way so the ESP32
+ * can keep pushing telemetry to Supabase.
+ *
+ * Called by the battery state machine to shut down user Wi-Fi at Warning
+ * level and restore it at Normal. Idempotent — re-calling with the same
+ * value is a cheap no-op. */
+void set_user_ap_enabled(bool enabled)
+{
+    static bool s_user_ap_enabled = true;
+    if (s_user_ap_enabled == enabled) {
+        return;
+    }
+    wifi_mode_t target = enabled ? WIFI_MODE_APSTA : WIFI_MODE_STA;
+    esp_err_t err = esp_wifi_set_mode(target);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "set_user_ap_enabled(%s) failed: %s",
+                 enabled ? "true" : "false", esp_err_to_name(err));
+        return;
+    }
+    s_user_ap_enabled = enabled;
+    ESP_LOGI(TAG, "user AP %s (mode=%s)",
+             enabled ? "ENABLED" : "DISABLED",
+             enabled ? "APSTA" : "STA-only");
+}
+
 const int CONNECTED_BIT = BIT0;
 #define JOIN_TIMEOUT_MS (2000)
 

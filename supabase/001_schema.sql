@@ -96,9 +96,12 @@ create index if not exists port_state_station_idx on public.port_state (station_
 -- specific port (battery level, future: solar watts, card_present, etc.).
 -- ----------------------------------------------------------------------------
 create table if not exists public.station_state (
-    station_id      text primary key default 'solar-hub-01',
-    battery_percent numeric check (battery_percent between 0 and 100),
-    updated_at      timestamptz not null default now()
+    station_id        text primary key default 'solar-hub-01',
+    battery_percent   numeric check (battery_percent between 0 and 100),
+    battery_voltage_v numeric,
+    battery_raw_mv    integer,
+    battery_state     text,
+    updated_at        timestamptz not null default now()
 );
 
 -- ----------------------------------------------------------------------------

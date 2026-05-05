@@ -15,6 +15,7 @@ This repository contains:
 - ESP32 firmware that creates `session_token`
 - ESP32 firmware that creates `device_hash`
 - Supabase SQL contract files used by the dashboard/backend integration
+- ESP32 firmware that pushes USB port telemetry (`port_state`) and battery telemetry (`station_state`)
 
 This repository does not contain:
 - the real Vercel PWA source code
@@ -240,3 +241,34 @@ Recommended wording for first-time instructions:
 - explain that the user must connect to `SOLAR CONNECT`
 - explain that they must open the local portal once and tap the app link
 - explain that after the first successful link, later visits to the generic dashboard should work automatically on the same browser/device
+
+## Station telemetry the PWA can read
+
+These tables are populated by the ESP32 firmware and are intended for direct read by the PWA dashboard. They are not part of the linking contract per se but are the other half of the data model the dashboard depends on.
+
+### `station_state`
+
+Single row per `station_id` (default `solar-hub-01`). Battery telemetry pushed every 5 s by the ESP32 battery sensor task:
+- `battery_percent` — 0–100 (currently a linear estimate from `battery_voltage_v` over an 11.6–13.6 V window)
+- `battery_voltage_v` — battery terminal voltage in volts
+- `battery_raw_mv` — calibrated ADC reading at GPIO 32 in millivolts (diagnostic)
+- `battery_state` — one of `normal | warning | critical | wake_up | charging_on`
+- `updated_at`
+
+Notes for PWA implementers:
+- The PWA currently only reads `battery_percent` and `updated_at`. Surfacing `battery_state` is recommended so the user understands why their session was disabled (e.g., "Wi-Fi paused — low battery").
+- Treat `battery_percent` as approximate. A piecewise LiFePO4 SoC curve is planned; until then, the value at any specific voltage is a best estimate, not a fuel-gauge reading.
+- The transition voltages in firmware do not yet line up with the spec's "25 % / 15 % / 10 %" thresholds — the dashboard may show ~50 % when `battery_state` flips to `warning`. This is a known firmware-side mismatch.
+
+### `port_state`
+
+One row per `(station_id, port_key)`. Currently populated by:
+- USB ports (`usb_a_1`, `usb_a_2`, `usb_c_1`, `usb_c_2`) — INA219 sensors, event-driven Supabase sync on status flip plus 30 s heartbeat
+- Outlet (`outlet`) — **only the manual `/ports` toggle**; the PZEM-004T AC reader runs but its data is not yet upserted into `port_state` or any other table
+
+Hardware caveat:
+- The USB-C INA219 boards on the current PCB rev (addresses 0x40 and 0x41) are physically faulty. The firmware skips them on the live `/port-occupied` page and the per-row sync. USB-C entries on the dashboard reflect only the manual `/ports` toggle until the PCB is fixed.
+
+Future telemetry the PWA should be ready for (not yet present):
+- AC voltage, current, power, cumulative energy from the PZEM-004T (final schema TBD — likely `station_state` extension or a new table)
+- Real eco-metric values (`today_energy_wh`, `today_co2_saved_g`) once `eco_metrics.c` is enabled — until then the PWA is expected to compute its own client-side estimate

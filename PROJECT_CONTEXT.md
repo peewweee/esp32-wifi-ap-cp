@@ -1,16 +1,17 @@
 # Project Context
 
-Last reviewed: 2026-04-07
+Last reviewed: 2026-05-05
 
 Review basis:
 - Current workspace contents, not just the last commit
 - Top-level build/config files
 - All authored source under `main/` and `components/`
 - Current SPIFFS assets under `spiffs_image/`
+- Recent commits adding battery ADC + state machine (`0fc6d6f`), PZEM-004T AC monitoring (`8083542`), and event-driven port sensor sync (`671d06e`)
 
 Current workspace note:
-- The current worktree is clean according to `git status --short`
-- This document reflects the currently checked out codebase plus the thesis/product framing provided on 2026-04-07
+- The worktree has staged hardware-bring-up work in progress; an untracked SQL migration `supabase/003_station_state_battery_telemetry.sql` is on disk
+- This document reflects the currently checked out codebase as of 2026-05-05
 
 ## Thesis/Product Framing
 
@@ -34,32 +35,34 @@ Important repo boundary:
 - The Vercel PWA is referenced from this firmware, but its source code is not present here
 - The solar charging electronics, port current sensing, RFID activation logic, and eco-metric calculations described in the thesis framing are partially implemented or planned for implementation in this repository
 
-Last reviewed and updated: 2026-05-01
+Last reviewed and updated: 2026-05-05
 - Full codebase analysis completed across all main/ and components/ directories
-- Current implementation status documented with all mismatches identified
-- System requirements vs. actual implementation gaps documented below
+- Current implementation status reflects the battery ADC, state machine, RFID-battery coordination, USB INA219 sync (now enabled in .env), and PZEM-004T AC reader that landed in recent commits
+- Outstanding gaps and threshold-calibration mismatches documented below
 
 ## Project Summary
 
 This repository contains ESP32 firmware for the connectivity and control subsystem of the Smart Solar Hub thesis project.
 
 The current firmware combines:
-- A SoftAP that is always exposed to clients (branded as `SOLAR CONNECT`)
-- An optional STA uplink to another Wi-Fi network (for MCU telemetry to Supabase)
+- A SoftAP that is exposed to clients in Normal battery state (branded as `SOLAR CONNECT`); the AP is auto-disabled by the battery state machine when battery voltage drops
+- An optional STA uplink to another Wi-Fi network (for MCU telemetry to Supabase). STA stays up across all non-shutdown battery states
 - IPv4 NAPT and port mapping for upstream internet access
 - A captive portal with session-gated internet access and terms acceptance
-- RFID-based physical activation (card presence detection and GPIO control)
-- Port current sensing integration (INA219 sensors, disabled by default)
-- Battery percentage tracking (manual test UI; hardware integration planned)
-- Battery-level-based operational thresholds (NOT YET IMPLEMENTED)
+- RFID-based physical activation: MFRC522 reader live, 6 power-control GPIOs driven by an authorized-card check, with a battery override that forces ports off in Critical state
+- USB port current sensing via four INA219 sensors on I2C (`PORT_SENSORS_ENABLED=1` and `PORT_SENSORS_SUPABASE_SYNC_ENABLED=1` are both set in the local `.env`); event-driven Supabase upserts on status change plus a 30 s heartbeat
+- AC outlet monitoring via PZEM-004T v1 over UART2 (reads V/I/P/Wh every 5 s). Currently logs only — no Supabase upsert and no `port_state.outlet` mapping yet
+- Battery voltage tracking: ADC1 channel 4 on GPIO 32 with a 5.5454× resistor divider, calibrated via line/curve fitting, sampled and pushed to Supabase every 5 s
+- Battery-level-based operational thresholds: voltage-driven state machine (`Normal / Warning / Critical / Wake Up / Charging On`) with 30 s debounce, hysteresis, user-AP toggling, and RFID port override
 - A serial CLI for configuration and diagnostics
 - SPIFFS-hosted image assets used by the portal UI
-- Supabase integration for session sync, port telemetry, and battery state
+- Supabase integration for session sync, USB port telemetry, and battery telemetry (`battery_percent`, `battery_voltage_v`, `battery_raw_mv`, `battery_state`)
 
 Important product-level framing:
 - The current root web experience is a captive portal at `/`
 - The configuration UI still exists at `/config`
-- The repository started from the ESP-IDF console example and an ESP32 NAT router example, then added a custom captive portal flow, diagnostics, RFID control, port sensors, Supabase sync, Vercel handoff, and Smart Solar Hub branding
+- A station test surface lives at `/ports` (manual port toggles + battery slider) and `/port-occupied` (live USB-A INA219 readings)
+- The repository started from the ESP-IDF console example and an ESP32 NAT router example, then added a custom captive portal flow, diagnostics, RFID activation with battery coordination, USB INA219 telemetry, PZEM AC reader, battery ADC + state machine, Supabase sync, Vercel handoff, and Smart Solar Hub branding
 - In the broader thesis architecture, this repo implements the embedded control layer that sits between the power/charging hardware and the cloud dashboard
 
 ## Thesis System Requirements
@@ -92,206 +95,258 @@ The system must enforce the following battery-level-based mode transitions:
 ### ✅ FULLY IMPLEMENTED
 
 1. **RFID Logic**
-   - Card authentication against 2 valid UID list
+   - MFRC522 over SPI3 (VSPI), pins SDA=5, SCK=18, MOSI=23, MISO=19, RST=4
+   - Card authentication against 2 authorized 4-byte NUIDs (Mifare Classic)
    - GPIO control of 6 power pins (4 MOSFETs + SSR + relay) on pins 12, 14, 27, 26, 25, 13
-   - 1-second card presence timeout
-   - **Limitation**: Power pins are controlled directly by RFID without checking battery level
+   - 1-second card presence timeout, 50 ms poll, antenna bounce after each read
+   - **Battery override**: `rfid_reader_set_ports_allowed()` lets the battery state machine force-off the ports regardless of card presence; on re-enable the next valid card poll will re-energize them
 
 2. **WiFi AP (SoftAP)**
-   - "SOLAR CONNECT" SSID (configurable)
-   - Optional STA uplink for telemetry
-   - DHCP server for AP clients
+   - "SOLAR CONNECT" SSID (configurable, WPA2/WPA3 PSK or open if password < 8 chars)
+   - Optional STA uplink for telemetry; STA stays up in every battery state below shutdown
+   - DHCP server for AP clients; advertises ESP32 itself as DNS for captive portal hijack
    - Max 8 concurrent clients
+   - `set_user_ap_enabled()` switches `WIFI_MODE_APSTA` ↔ `WIFI_MODE_STA` based on battery state
 
 3. **Captive Portal & Session Management**
    - Terms and conditions gate at `/` with checkbox acceptance
    - Session token generation + stable device_hash (MAC-based)
    - 3600 seconds (1 hour) daily quota per device/MAC
-   - Supabase sync: heartbeat (30s), session state (active/expired/disconnected)
+   - Supabase sync: heartbeat (30 s), session state (active/expired/disconnected)
+   - Per-client gating via `client_acl_*` admit/revoke + lwIP IPv4 input hook (`lwip_hooks.c`) that drops non-admitted egress and rewrites probe traffic to the portal IP
+   - DHCP option 114 advertises the captive portal URL
    - PWA one-time linking via `/confirm` redirect
 
-4. **Port State Tracking**
-   - All 5 ports defined: USB-A 1/2, USB-C 1/2, Outlet
-   - Manual test UI at `/ports` with toggles
-   - INA219 sensor code prepared (disabled: `PORT_SENSORS_ENABLED=0`)
-   - Current threshold: 50mA (configurable) for in_use detection
-   - Sends to Supabase: current_ma, bus_voltage_v, status (available/in_use/fault/offline)
+4. **USB Port Sensing (INA219)**
+   - I2C bus on SDA=21, SCL=22, 100 kHz; external 5 V pull-ups on the breakouts
+   - Four INA219s mapped: USB-C 1 → 0x44, USB-C 2 → 0x41, USB-A 1 → 0x40, USB-A 2 → 0x45
+   - Current threshold 50 mA (configurable) → `available` / `in_use`
+   - Event-driven sync task: pushes to Supabase on status flip, plus 30 s heartbeat per port
+   - **Hardware caveat**: USB-C INA219s at 0x40 and 0x41 are reported faulty on the current PCB rev (SCL pin internally shorted to GND); the live `/port-occupied` page intentionally only renders USB-A 1 and USB-A 2
+   - Live readings exposed at `/api/ports/sensors`; one-shot Supabase sync at `POST /api/ports/sensors/sync`
 
-5. **Manual Battery Status (Test UI)**
-   - Slider at `/ports` to simulate battery percentage (0-100)
-   - Sends to Supabase: `station_state.battery_percent`
-   - **Important**: This is manual-only; no hardware ADC reading yet
+5. **AC Outlet Sensing (PZEM-004T v1)**
+   - UART2: TX=GPIO 17 (→ PZEM RX), RX=GPIO 16 (← PZEM TX), 9600 baud
+   - Legacy 7-byte Peacefair binary protocol (NOT Modbus); device address 192.168.1.1 (default)
+   - Reads voltage / current / power / cumulative energy every 5 s
+   - **Limitation**: data is logged only. PZEM does not yet upsert `port_state.outlet` and does not yet write any AC fields to `station_state` or a dedicated table
 
-6. **Supabase Schema & Integration**
-   - `sessions` table: session_token, device_hash, installation_id, remaining_seconds, status
-   - `port_state` table: port_key, status, current_ma, bus_voltage_v
-   - `station_state` table: battery_percent, updated_at
-   - Three RPCs defined: `claim_session_link()`, `resolve_installation_session()`, `cleanup_old_sessions()`
-   - Session heartbeat task + state update queue in http_server.c
+6. **Battery Voltage + State Machine**
+   - ADC1 channel 4 on GPIO 32, 12-bit, full-range attenuation (0–3.3 V), 16-sample average
+   - Voltage divider ratio 5.5454× (R1 = 100 kΩ, R2 = 22 kΩ)
+   - Curve fitting / line fitting calibration depending on target
+   - Five states: `Normal / Warning / Critical / Wake Up / Charging On`, with 30 s debounce (6 × 5 s)
+   - Boot averaging (5 samples × 500 ms) selects initial state
+   - Side effects per state: user AP enable/disable, RFID port allow/block
+   - Supabase upsert every 5 s: `battery_percent`, `battery_voltage_v`, `battery_raw_mv`, `battery_state`
+   - **Mismatch**: voltage thresholds and the linear `voltage → percent` mapping do not line up with the thesis spec (see Mismatches section)
+
+7. **Coordinated Power State (RFID × Battery)**
+   - `set_user_ap_enabled()` and `rfid_reader_set_ports_allowed()` are declared in `router_globals.h:67-68` and called from `apply_actions_for_state()` in `battery_sensor.c:131`
+   - In Critical state the RFID-controlled power outputs are forced off; in Warning state the user AP is dropped; STA telemetry continues across all non-shutdown states
+   - **Limitation**: The 10 % shutdown step is delegated to the hardware MPPT cut — there is no firmware action that flushes a final telemetry sync before power loss
+
+8. **Supabase Schema & Integration**
+   - `sessions` table: legacy + new identifiers, `installation_id`, `remaining_seconds`, `status`
+   - `port_state` table: `port_key`, `status`, `current_ma`, `bus_voltage_v`
+   - `station_state` table: `battery_percent`, `battery_voltage_v`, `battery_raw_mv`, `battery_state`, `updated_at`
+   - Three RPCs in the live DB: `claim_session_link()`, `resolve_installation_session()`, `cleanup_old_sessions()` (the SQL file ships only stub bodies; live bodies must be exported from Supabase Studio)
+   - Session heartbeat task + Supabase update queue in `http_server.c`
+   - Migration `003_station_state_battery_telemetry.sql` adds the battery telemetry columns; **untracked in git as of 2026-05-05**
+
+### ⚠️ PARTIALLY IMPLEMENTED / NEEDS WORK
+
+1. **AC Outlet Telemetry Pipeline**
+   - PZEM hardware reads work; nothing is published.
+   - **Needed**: map current/power to `port_state.outlet` `available`/`in_use`, and decide whether AC voltage/power/energy belong on `station_state` or a new table.
+
+2. **Battery Threshold Calibration**
+   - State machine is in place but acts on raw voltages that don't line up with the thesis spec's percentage thresholds (see Mismatch 1 below).
+   - The linear curve assumes a generic 12 V profile; LiFePO4 voltage curves are flat in the middle and need a piecewise lookup or coulomb counting for accurate SoC.
+
+3. **Graceful Shutdown at 10 %**
+   - No firmware-side action; relies on MPPT cutoff.
+   - **Needed**: a `Shutdown` state that issues a final telemetry flush and disables radios cleanly before voltage drops further.
+
+4. **Eco Metrics**
+   - `eco_metrics.c` is wired in but `ECO_METRICS_ENABLED=0`; the PWA fakes CO₂ savings client-side from `portsInUseCount × 3.5 g`.
+   - **Needed**: enable the module, drive samples from the INA219 task and the PZEM reader, persist to Supabase.
+
+5. **Session Persistence Across Reboot**
+   - Sessions are RAM-only; daily quota records do persist in NVS, but `DEV_RESET_QUOTA_ON_BOOT=1` in `http_server.c:69` clears them on every boot.
+   - **Needed for production demo**: flip `DEV_RESET_QUOTA_ON_BOOT` to `0`.
 
 ### ❌ NOT YET IMPLEMENTED
 
-1. **AC Sensor Reading**
-   - No AC current measurement code
-   - Outlet port exists in schema but only manually settable in test UI
-   - **Required for**: Full port telemetry per thesis design
-
-2. **Battery Percentage Hardware Reading**
-   - No ADC reading from voltage divider
-   - No fuel gauge IC integration (e.g., BMS serial data)
-   - LiFePO4 battery state must be read from hardware
-   - **Current workaround**: Manual slider in test UI only
-   - **Required for**: Operational threshold automation
-
-3. **Battery Operational Thresholds & System State Machine** ⚠️ CRITICAL
-   - **NO** state machine for battery-driven system transitions
-   - **NO** WiFi (Users) disable at 25% falling
-   - **NO** charging port disable at 15% falling
-   - **NO** MCU-only telemetry mode at 15% falling
-   - **NO** system shutdown trigger at 10% falling
-   - **NO** recovery logic for 13%, 20%, 30% thresholds
-   - **Impact**: System cannot degrade gracefully based on battery level
-   - **Required for**: Thesis thesis compliance and energy efficiency
-
-4. **Coordinated Power State Management**
-   - **NO** global system state machine tracking:
-     - card_present (RFID)
-     - battery_percent (hardware input)
-     - system_mode (full service / users disabled / ports disabled / MCU only / shutdown)
-   - **Current behavior**: RFID controls power pins directly, independent of battery
-   - **Problem**: Even at 10% battery, RFID can activate charging ports
-   - **Required for**: Safe hardware operation
+- USB-C port sensing on the production PCB (waiting on the 0x40 / 0x41 INA219 hardware fix)
+- Eco-achievement / CO₂-savings calculation surfaced from real port energy
+- Push of PZEM AC telemetry into Supabase
+- Firmware action for the 10 % shutdown threshold
 
 ### Detailed Feature Gaps
 
 | Feature | Status | Dependency | Thesis Impact |
 |---------|--------|------------|---|
-| AC current sensor | ❌ | Hardware ADC + sensor IC | Incomplete telemetry |
-| Battery ADC reading | ❌ | Voltage divider circuit | Cannot read actual battery state |
-| Battery threshold enforcement | ❌ | Battery reading + state machine | Core thesis feature missing |
-| WiFi mode switching | ❌ | System state machine | Can't restrict to telemetry-only mode |
-| System shutdown trigger | ❌ | Battery threshold + power control | Can't protect battery from over-discharge |
-| Recovery hysteresis | ❌ | System state machine | Can't prevent battery cycling |
-| Power state coordination | ❌ | System state machine + RFID refactor | Cannot enforce battery limits on ports |
+| AC outlet → Supabase | ⚠️ partial | PZEM read works; outlet upsert + schema decision pending | Outlet on dashboard reflects manual `/ports` toggle only |
+| AC voltage/power/energy telemetry | ❌ | New columns/table + ESP32 push | No AC analytics on dashboard |
+| Battery threshold calibration | ⚠️ partial | State machine exists; thresholds don't match spec percentages | Transitions trigger at the wrong battery levels |
+| LiFePO4 SoC curve | ❌ | Piecewise lookup or coulomb counter | Reported `battery_percent` is unreliable mid-discharge |
+| Graceful shutdown action | ❌ | Final-flush hook before MPPT cut | Last telemetry can be lost |
+| Eco metrics | ❌ | `ECO_METRICS_ENABLED=1` + sampling task | CO₂ savings on dashboard are stubbed |
+| USB-C INA219 readings | ❌ | PCB rev fixing the 0x40 / 0x41 chips | USB-C ports unreported in live readings |
+| Persistent active sessions | ❌ | NVS-backed session table | Reboot drops everyone's countdown |
+| Session quota persistence demo-mode | ⚠️ | Flip `DEV_RESET_QUOTA_ON_BOOT` to 0 | Reboot grants every device a fresh hour |
 
 ## Critical Mismatches: Specification vs. Implementation
 
-### Mismatch 1: Power Control Architecture
-**Specification:** "RFID card presence activates system. Battery thresholds enforce what the system can do."
-**Implementation:** RFID directly controls power pins without checking battery level.
-**Impact:** At 10% battery, RFID can still turn on charging ports → battery damage risk.
+### Mismatch 1: Battery thresholds use voltage, but the spec is in percent — and the mapping is off ⚠️ HIGHEST PRIORITY
+**Specification:** transitions at 25 / 15 / 10 % falling and 13 / 20 / 30 % recovering.
+**Implementation:** `battery_sensor.h:62-77` linearly maps `11.6 V → 0 %` and `13.6 V → 100 %`, then transitions on raw volts:
 
-### Mismatch 2: WiFi Mode Transitions
-**Specification:** "25% falling: WiFi (Users) disabled. 15% falling: WiFi (MCU telemetry only)."
-**Implementation:** WiFi AP is always active when RFID card is present. No mode switching.
-**Impact:** Users can get WiFi at critically low battery levels. No telemetry-only survival mode.
+| Spec event | Code threshold | What that voltage maps to in % |
+|---|---|---|
+| 25 % falling → user AP off | `12.6 V` (`BATTERY_V_WARNING_FALL`) | **50 %** |
+| 15 % falling → ports off | `11.8 V` (`BATTERY_V_CRITICAL_FALL`) | **10 %** |
+| 10 % shutdown | `11.6 V` (delegated to MPPT) | **0 %** |
+| 13 % recovering → wake | `12.4 V` (`BATTERY_V_WAKEUP_BOOT_LOW`) | **40 %** |
+| 20 % recovering → ports on | `12.8 V` (`BATTERY_V_CHARGING_RISE`) | **60 %** |
+| 30 % recovering → users on | `13.2 V` (`BATTERY_V_NORMAL_RISE`) | **80 %** |
 
-### Mismatch 3: Graceful Shutdown
-**Specification:** "10% falling: Complete system shutdown. Final telemetry sync before power loss."
-**Implementation:** No shutdown logic. System continues normal operation regardless of battery.
-**Impact:** System cannot prevent LiFePO4 over-discharge damage.
+**Impact:** the dashboard shows ~60 % when the firmware decides to re-enable charging ports, etc. Either recalibrate the voltage thresholds against measured battery behavior under load, or move the state machine to act on percent and use voltage only as the SoC estimator.
 
-### Mismatch 4: AC Outlet Telemetry
+### Mismatch 2: SoC curve assumes a generic 12 V profile, hardware is LiFePO4
+**Specification / hardware:** 12 V 100 Ah LiFePO4 battery.
+**Implementation:** `battery_sensor.h:13-29` describes the curve as a "12 V lead-acid curve"; `battery_percent_from_voltage()` does linear interpolation between 11.6 V and 13.6 V.
+**Impact:** LiFePO4 voltage is very flat (~13.0–13.4 V) over the middle of its discharge, so a linear curve will misreport SoC during normal operation. A piecewise lookup table or a coulomb counter (INA219 + PZEM integrated against time) is more accurate.
+
+### Mismatch 3: AC outlet telemetry not pushed
 **Specification:** "Send AC port availability/in-use status to Supabase."
-**Implementation:** Outlet is in port list but no AC current sensor code. Only manual test UI.
-**Impact:** PWA dashboard shows incomplete charging station state.
+**Implementation:** `pzem_reader.c` reads V/I/P/Wh every 5 s but only `ESP_LOGI`s them. There is no `port_state.outlet` upsert based on PZEM current and no AC field in `station_state`.
+**Impact:** Outlet on the PWA reflects only the manual `/ports` toggle; AC voltage / power / energy never reach the dashboard.
 
-### Mismatch 5: Battery State Visibility
-**Specification:** "Read and report battery percentage to dashboard."
-**Implementation:** Only manual test slider. No hardware ADC integration.
-**Impact:** Dashboard cannot show real battery state. Manual testing only.
+### Mismatch 4: Graceful shutdown step is delegated to hardware
+**Specification:** "10 % falling: Complete system shutdown. Final telemetry sync before power loss."
+**Implementation:** `battery_sensor.c:197-208` comments out shutdown handling on the firmware side and notes "Falling further triggers hardware MPPT shutdown — ESP loses power and we never see it."
+**Impact:** The last battery state and last session state may not reach Supabase; the dashboard can show stale data after a shutdown.
 
-### Mismatch 6: RFID-Battery Coordination
-**Specification:** "RFID physically gates access. Battery level gates functionality. Combined logic."
-**Implementation:** RFID and battery tracking are decoupled. No combined logic.
-**Impact:** No safety override when battery critical. Firmware doesn't enforce thesis design.
+### Mismatch 5: USB-C port sensing is silent on the current PCB
+**Specification:** All four USB ports report current and bus voltage.
+**Implementation:** USB-C INA219s at 0x40 and 0x41 are flagged as faulty in `admin_ports.c:245-248`; the live readings page only renders USB-A 1 and USB-A 2.
+**Impact:** USB-C status on the dashboard depends entirely on the manual `/ports` toggle until the PCB is fixed.
 
-## System Architecture: Current vs. Required
+### Mismatch 6: Eco metrics are stubbed
+**Specification:** "Eco-achievement / CO₂ savings calculation."
+**Implementation:** `eco_metrics.c` exists but `ECO_METRICS_ENABLED=0`; the dashboard fakes CO₂ savings with `portsInUseCount × 3.5 g`.
+**Impact:** The thesis's eco-metric story is not based on real energy data.
 
-### Current Architecture (Incomplete)
+### Mismatch 7: Active session persistence and dev-mode quota reset
+**Specification:** Sessions and daily quotas survive reboot.
+**Implementation:** Sessions are RAM-only; quota is NVS-backed but `DEV_RESET_QUOTA_ON_BOOT=1` in `http_server.c:69` wipes the quota table on every boot.
+**Impact:** A reboot during the demo restarts every connected device's countdown and gives all of them a fresh hour.
+
+### Mismatch 8: Hard-coded admin credentials
+**Specification:** Admin surface should be protected.
+**Implementation:** `admin / admin123` in `http_server.c:46-52`, overridable through CMake but defaulted in source.
+**Impact:** Anyone on `SOLAR CONNECT` can reach `/config` with the default credentials.
+
+## System Architecture: Current
+
 ```
-RFID Card Present
-    ↓
-[RFID Module] → GPIO 12,14,27,26,25,13 ON (unconditional)
-    ↓
-Charging Ports Active
-    ↓
-WiFi AP Active (if card present)
-    ↓
-User WiFi Session (1 hour quota)
-    ↓
-Supabase: session tracking + manual port/battery status
-```
+Battery ADC (GPIO 32) ──────► battery_sensor_task
+                                  │  voltage → percent (linear, 11.6–13.6 V)
+                                  │  evaluate_transitions() with 30 s debounce + hysteresis
+                                  ▼
+                          [State Machine: NORMAL / WARNING / CRITICAL / WAKE_UP / CHARGING_ON]
+                                  │
+                ┌─────────────────┼─────────────────┐
+                ▼                 ▼                 ▼
+   set_user_ap_enabled()   rfid_reader_set_   supabase_post_upsert(station_state)
+   (APSTA ↔ STA-only)      ports_allowed()    (battery_percent, voltage_v, raw_mv, state)
+                                  │
+                                  ▼
+                          [RFID poll @ 50 ms]
+                          MFRC522 → authorized UID?
+                                  │
+                                  ▼
+                          GPIO 12/14/27/26/25/13 (4 MOSFETs + SSR + relay)
 
-### Required Architecture (Full Thesis Implementation)
-```
-RFID Card Present + Battery %
-    ↓
-[System State Machine]
-    ├─ 100%-26%: Full Service (All ON)
-    ├─ 25% Fall: Users WiFi OFF
-    ├─ 15% Fall: Ports OFF, MCU Telemetry ON
-    ├─ 10% Fall: SHUTDOWN
-    ├─ 13% Recov: MCU Telemetry ON
-    ├─ 20% Recov: Ports ON
-    └─ 30% Recov: Users WiFi ON
-    ↓
-[Power Control]
-├─ GPIO control (ports, SSR, relay)
-├─ WiFi AP mode switching (full AP vs. STA-only)
-├─ Session enforcement (Users vs. MCU-only)
-└─ Graceful shutdown sequence
-    ↓
-[Supabase Telemetry]
-├─ Battery %, trending direction
-├─ Port current/voltage (AC + USB)
-├─ System state (mode, reason)
-├─ Final sync before shutdown
-└─ Session state (active/paused/shutdown)
+USB INA219s (0x44 / 0x41 / 0x40 / 0x45)  ──► port_sensors_sync_task
+                                              event-driven on status flip + 30 s heartbeat
+                                              ──► supabase_post_upsert(port_state)
+
+PZEM-004T (UART2 GPIO 16/17)             ──► pzem_task @ 5 s  (LOG ONLY — no upsert yet)
+
+SoftAP "SOLAR CONNECT"
+   │
+   ▼
+DHCP / DNS hijack ──► captive portal /  → /confirm
+   │                              │
+   │                              ▼
+   ▼                       client_acl_admit() + lwip ip4_input hook
+HTTP session table (RAM)         │
+   │                              ▼
+   ▼                          NAPT egress allowed; quota counted in NVS
+supabase_create_session / heartbeat / disconnect (sessions table)
 ```
 
 ## Implementation Roadmap
 
-**Phase 1: Hardware Integration** (Prerequisites)
-- Implement battery ADC reading from voltage divider
-- Implement AC current sensor (if hardware added)
-- Test hardware inputs before state machine logic
+Phases 1–3 from the original plan are largely complete in code. Remaining work, in priority order:
 
-**Phase 2: State Machine Core** (Foundation)
-- Create system_state_manager module
-- Implement battery threshold detection with hysteresis
-- Implement state transitions (falling/recovering)
-- Add state validation and logging
+**Phase 4: Calibrate the battery state machine**
+- Recalibrate `BATTERY_V_*` against measured battery behavior under representative load, OR move the state machine to act on percent and use voltage only as the SoC estimator
+- Replace the linear `voltage → percent` curve with a LiFePO4-shaped piecewise lookup
+- Implement a `Shutdown` state with a final Supabase flush before MPPT cuts power
 
-**Phase 3: Power & WiFi Control** (Integration)
-- Refactor RFID to check system state before activating power
-- Implement WiFi mode switching (AP vs. STA-only)
-- Implement graceful shutdown sequence
-- Add Supabase reporting of system state + reason
+**Phase 5: AC outlet telemetry**
+- Map PZEM current/power to `port_state.outlet` `available`/`in_use`
+- Decide schema location for AC voltage / power / cumulative energy and push it on the same 5 s cadence
+- Update the PWA to render AC fields
 
-**Phase 4: Testing & Documentation** (Finalization)
-- Validate all threshold transitions with simulated battery curves
-- Document state machine behavior and recovery procedures
-- Update PWA dashboard to handle new system states
-- Test battery protection limits with hardware
+**Phase 6: Eco metrics**
+- Flip `ECO_METRICS_ENABLED=1` and feed it from the INA219 sync task and the PZEM reader
+- Persist `today_energy_wh` and `today_co2_saved_g` to Supabase
+- Replace the PWA's stub estimate with the real value
+
+**Phase 7: Hardening for thesis demo**
+- Set `DEV_RESET_QUOTA_ON_BOOT=0` and verify quota persistence across reboot
+- Replace hard-coded admin password (CMake or NVS-backed)
+- Persist active sessions in NVS so a reboot doesn't drop everyone's countdown
+- Fix the USB-C INA219 PCB issue (0x40 / 0x41) so live USB-C readings work
 
 ## Repository Layout
 
 Main authored areas:
 - `main/esp32_nat_router.c`
-  App entrypoint, NVS and SPIFFS init, Wi-Fi/AP+STA setup, event handlers, NAT/portmap helpers, LED thread, console loop, web/DNS startup
+  App entrypoint, NVS and SPIFFS init, Wi-Fi/AP+STA setup, event handlers, NAT/portmap helpers, LED thread, console loop, web/DNS startup, and the launchers for `port_sensors`, `rfid_reader`, `pzem_reader`, and `battery_sensor`
 - `main/http_server.c`
   Captive portal HTTP server, admin config page, per-client session tracking, captive-probe handling, SPIFFS image serving, dashboard handoff, Supabase session sync
 - `main/dns_server.c`
-  Custom UDP DNS server used for captive portal DNS hijacking and upstream DNS forwarding
+  Custom UDP DNS server used for captive portal DNS hijacking and upstream DNS forwarding (with a per-day RAM cache)
+- `main/lwip_hooks.c`
+  IPv4 input hook that drops non-admitted egress and rewrites probe traffic to the captive portal IP; DHCP option 114 emitter
+- `main/client_acl.c`
+  Per-client admit/revoke list shared by HTTP, DNS, and the lwIP hook
 - `main/net_diag.c`
   Runtime network diagnostics, NAPT state logging, and active connectivity probes
 - `main/supabase_client.c`
-  REST integration for remote session creation, heartbeat updates, and disconnect status
+  REST integration for remote session creation, heartbeat updates, disconnect status, and the generic `supabase_post_upsert()` used by port/battery telemetry
+- `main/admin_ports.c`
+  HTML test surfaces (`/ports`, `/port-occupied`) and JSON APIs for manual port toggling, battery-percent simulation, INA219 live readings, I2C scan, and one-shot port sync
+- `main/port_sensors.c`
+  INA219 driver, I2C bus management, status classification, event-driven Supabase sync task
+- `main/rfid_reader.c`
+  MFRC522 driver, authorized UID list, GPIO power-pin control, battery override hook
+- `main/pzem_reader.c`
+  PZEM-004T v1 binary protocol implementation over UART2; periodic read task (logging only at present)
+- `main/battery_sensor.c`
+  ADC sampling, calibration, voltage-driven state machine, Supabase upsert task
+- `main/eco_metrics.c`
+  Stubbed energy / CO₂ accumulator (`ECO_METRICS_ENABLED=0` for now)
 - `main/pages.h`
   Embedded HTML for the legacy config/admin page and an unused lock page
 - `components/cmd_router/cmd_router.c`
-  Router-specific CLI commands and config helpers
+  Router-specific CLI commands and config helpers; declares the `set_user_ap_enabled()` and `rfid_reader_set_ports_allowed()` battery-action hooks
 - `components/cmd_nvs/cmd_nvs.c`
   Generic NVS CLI commands
 - `components/cmd_system/cmd_system.c`
@@ -525,7 +580,12 @@ Default behavior when keys are missing:
 
 External configuration:
 - Supabase base URL and API key are injected through top-level `CMakeLists.txt`, optionally loaded from a local `.env`
-- The checked-in default API key is still a placeholder, so remote session sync will not work until a real key is supplied
+- `.env` keys read by the build:
+  - `SUPABASE_BASE_URL`, `SUPABASE_API_KEY`
+  - `ADMIN_USERNAME`, `ADMIN_PASSWORD`
+  - `PORT_SENSORS_ENABLED`, `PORT_SENSORS_SUPABASE_SYNC_ENABLED`, `PORT_IN_USE_THRESHOLD_MA`
+- The same three port-sensor variables can also be set in the build environment and override `.env`
+- The checked-in default API key is a placeholder; remote writes fail until a real key is supplied. The `.env` file in the working directory is the canonical place to set runtime sensor flags for this PCB rev (currently `PORT_SENSORS_ENABLED=1` and `PORT_SENSORS_SUPABASE_SYNC_ENABLED=1`)
 
 ## CLI Surface
 
@@ -619,42 +679,42 @@ What those files represent today:
 - `ESP32_NAT_UI3.png` and the README still document the older root-at-192.168.4.1 config page experience
 - `test.html` and `spiffs_image/` align more closely with the current connected-page branding
 
-## Current Mismatches And Risks
-
-Documentation drift:
-- `README.md` still describes the old web-config-at-root behavior
-- The live root route is now the captive portal, not the admin config page
-- The repository currently documents a connectivity-focused firmware, while the thesis framing describes a larger smart charging station platform
-- Hardware features in the thesis narrative such as RFID activation, charging-port telemetry, eco-gamification, and announcement delivery are not represented in code in this repo
+## Current Risks
 
 Security issues:
-- Admin HTTP credentials are hard-coded in source as `admin` / `admin123`
-- Wi-Fi credentials are submitted through HTTP GET parameters on `/config`
+- Admin HTTP credentials default to `admin` / `admin123` (overridable via CMake but defaulted in source)
+- Wi-Fi credentials are submitted through HTTP form parameters on `/config` over plain HTTP (acceptable for an AP-only admin surface, but worth flagging)
 - Sensitive config values are printed to the serial log and `show` output
 
 Session enforcement limitations:
-- Sessions are still stored in RAM only, so active-session recovery across ESP32 reboot is incomplete
-- NAT is enabled globally, so the access-control model is still not a strict per-client firewall
+- Sessions are still stored in RAM only, so active sessions do not recover across an ESP32 reboot
+- NAT is enabled globally, but per-client gating is enforced at the lwIP IP hook + ACL layer, so non-admitted clients cannot egress
 - Long-term linkage depends on the firmware resolving a stable `device_hash`; if MAC lookup falls back to IP-derived hashing, the PWA/backend linkage becomes weaker
 - The firmware can expose the local portal at `192.168.4.1`, but it cannot guarantee that mobile and desktop operating systems will auto-open the captive portal popup on every reconnect
 - The complete one-time-bind dashboard experience depends on the external PWA implementing the contract in `PWA_LINKING_CONTRACT.md`
 
 Admin/config limitations:
-- The config page displays Enterprise and static IP fields, but the handler does not persist them from web submissions
-- Web STA updates clear saved Enterprise credentials
+- `/config` POST handler now processes `save_ap`, `save_sta`, `save_static`, and `reboot` actions; Enterprise fields are read; static IP is read
+- A web STA save without explicit Enterprise fields will still leave the saved password as the previously stored value rather than blanking it (`load_config_string_or_default()`)
+
+Hardware caveats to keep in mind:
+- USB-C INA219 boards at 0x40 and 0x41 are reported faulty on the current PCB rev; live readings only render USB-A 1 and USB-A 2
+- `BATTERY_VOLTAGE_DIVIDER_RATIO` is `5.5454f` for the current 100 kΩ + 22 kΩ divider; if the divider is changed, `battery_sensor.h` must be updated
+- The PZEM-004T v1 module address defaults to `192.168.1.1`; this is the legacy Peacefair format, not Modbus, and not the v3 PZEM protocol
 
 Implementation quirks to keep in mind:
 - `set_ap_ip` writes `ap_ip` to NVS but does not call `nvs_commit()`, so persistence is incomplete
-- `portal_authenticated` is declared globally but is not part of the active enforcement flow
+- `portal_authenticated` is declared globally but the authoritative gating is the per-client ACL + lwIP hook
 - `LOCK_PAGE` is present but unused
 - `wifi_init()` waits on an event bit before `esp_wifi_start()`, so that wait does not currently gate startup in a meaningful way
 
-Thesis alignment gaps:
-- No RFID module code or MFRC522 integration is present
-- No charging-port availability detection or current sensing is present
-- No battery, solar, or inverter telemetry is present
-- No on-device CO2-savings or gamification logic is present
-- No local API for structured station metrics exists beyond `/api/status`
+Thesis alignment gaps (remaining):
+- AC outlet telemetry: PZEM reads but does not publish (see Mismatch 3)
+- Battery threshold calibration vs. spec percentages (see Mismatch 1)
+- LiFePO4-shaped SoC curve (see Mismatch 2)
+- Firmware-side graceful shutdown (see Mismatch 4)
+- Real eco-metric calculation (see Mismatch 6)
+- Persistent active sessions across reboot (see Mismatch 7)
 
 ## Useful Mental Model
 

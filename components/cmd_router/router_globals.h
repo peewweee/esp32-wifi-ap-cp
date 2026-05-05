@@ -63,6 +63,10 @@ void handle_client_connect(const uint8_t mac[6]);
 void handle_client_disconnect(const uint8_t mac[6]);
 void handle_client_ip_assigned(const uint8_t mac[6], uint32_t ip_net);
 
+/* Battery state machine action hooks. */
+void set_user_ap_enabled(bool enabled);
+void rfid_reader_set_ports_allowed(bool allowed);
+
 #ifdef __cplusplus
 }
 #endif

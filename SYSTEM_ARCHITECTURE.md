@@ -23,9 +23,9 @@ The full thesis system spans both hardware and software domains:
 - user-facing Progressive Web App (PWA)
 
 Important scope note:
-- This repository currently implements the `ESP32 connectivity firmware` layer
+- This repository implements the `ESP32 connectivity firmware` layer plus the embedded sensing/control needed for the thesis: RFID activation, USB current sensing (INA219), AC monitoring (PZEM-004T), battery ADC + threshold-driven state machine, and Supabase telemetry
 - The remote PWA is referenced by the firmware, but its source code is not included in this repository
-- Some thesis-described features remain architectural targets and are not yet implemented in this codebase
+- A few thesis-described features remain architectural targets — most importantly the PZEM → Supabase pipeline, battery threshold calibration to match the spec percentages, a firmware-side graceful shutdown, and real eco-metric calculation from INA219/PZEM data
 
 ## 3. Architectural Overview
 
@@ -87,8 +87,12 @@ Responsibilities:
 - support off-grid station operation
 
 Current repository status:
-- this layer is part of the overall thesis architecture
-- its monitoring and control logic is not yet implemented in this repository
+- The physical hardware lives outside this repository
+- The firmware now monitors and reacts to battery voltage and per-port current/voltage:
+  - GPIO 32 ADC → battery voltage / state-of-charge / state-machine label
+  - I2C INA219s → per-USB-port current and bus voltage
+  - UART2 PZEM-004T → AC voltage / current / power / cumulative energy
+  - GPIO 12/14/27/26/25/13 → 4 MOSFETs, 1 SSR, 1 relay, gated by RFID + battery state
 
 ### 4.2 Embedded Control Layer
 
@@ -103,11 +107,19 @@ Responsibilities:
 - coordinate remote status synchronization
 
 Current implementation in this repository:
-- [main/esp32_nat_router.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\esp32_nat_router.c)
-- [main/http_server.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\http_server.c)
-- [main/dns_server.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\dns_server.c)
-- [main/net_diag.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\net_diag.c)
-- [main/supabase_client.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\supabase_client.c)
+- [main/esp32_nat_router.c](c:\cp\esp32-wifi-ap-cp\main\esp32_nat_router.c)
+- [main/http_server.c](c:\cp\esp32-wifi-ap-cp\main\http_server.c)
+- [main/dns_server.c](c:\cp\esp32-wifi-ap-cp\main\dns_server.c)
+- [main/lwip_hooks.c](c:\cp\esp32-wifi-ap-cp\main\lwip_hooks.c)
+- [main/client_acl.c](c:\cp\esp32-wifi-ap-cp\main\client_acl.c)
+- [main/admin_ports.c](c:\cp\esp32-wifi-ap-cp\main\admin_ports.c)
+- [main/rfid_reader.c](c:\cp\esp32-wifi-ap-cp\main\rfid_reader.c)
+- [main/port_sensors.c](c:\cp\esp32-wifi-ap-cp\main\port_sensors.c)
+- [main/pzem_reader.c](c:\cp\esp32-wifi-ap-cp\main\pzem_reader.c)
+- [main/battery_sensor.c](c:\cp\esp32-wifi-ap-cp\main\battery_sensor.c)
+- [main/eco_metrics.c](c:\cp\esp32-wifi-ap-cp\main\eco_metrics.c)
+- [main/net_diag.c](c:\cp\esp32-wifi-ap-cp\main\net_diag.c)
+- [main/supabase_client.c](c:\cp\esp32-wifi-ap-cp\main\supabase_client.c)
 
 ### 4.3 Network Access Layer
 
@@ -153,7 +165,7 @@ Main functions:
 - transition authenticated users to the connected state
 
 Implementation:
-- [main/http_server.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\http_server.c)
+- [main/http_server.c](c:\cp\esp32-wifi-ap-cp\main\http_server.c)
 
 Key routes:
 - `/` for the landing page
@@ -171,7 +183,7 @@ Main functions:
 - preserve portal interception until access is granted
 
 Implementation:
-- [main/dns_server.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\dns_server.c)
+- [main/dns_server.c](c:\cp\esp32-wifi-ap-cp\main\dns_server.c)
 
 ### 5.3 Routing and NAT Subsystem
 
@@ -184,8 +196,8 @@ Main functions:
 - support optional port mapping
 
 Implementation:
-- [main/esp32_nat_router.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\esp32_nat_router.c)
-- [components/cmd_router/cmd_router.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\components\cmd_router\cmd_router.c)
+- [main/esp32_nat_router.c](c:\cp\esp32-wifi-ap-cp\main\esp32_nat_router.c)
+- [components/cmd_router/cmd_router.c](c:\cp\esp32-wifi-ap-cp\components\cmd_router\cmd_router.c)
 
 ### 5.4 Session Management Subsystem
 
@@ -206,7 +218,7 @@ Current design characteristics:
 - long-term PWA identity is expected to come from `installation_id`, not a permanent session token
 
 Implementation:
-- [main/http_server.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\http_server.c)
+- [main/http_server.c](c:\cp\esp32-wifi-ap-cp\main\http_server.c)
 
 ### 5.5 Configuration and Persistence Subsystem
 
@@ -228,9 +240,9 @@ Persistent values include:
 - port mapping table
 
 Implementation:
-- [components/cmd_router/cmd_router.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\components\cmd_router\cmd_router.c)
-- [components/cmd_nvs/cmd_nvs.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\components\cmd_nvs\cmd_nvs.c)
-- [main/pages.h](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\pages.h)
+- [components/cmd_router/cmd_router.c](c:\cp\esp32-wifi-ap-cp\components\cmd_router\cmd_router.c)
+- [components/cmd_nvs/cmd_nvs.c](c:\cp\esp32-wifi-ap-cp\components\cmd_nvs\cmd_nvs.c)
+- [main/pages.h](c:\cp\esp32-wifi-ap-cp\main\pages.h)
 
 ### 5.6 Diagnostics and Cloud Sync Subsystem
 
@@ -245,10 +257,87 @@ Cloud sync responsibilities:
 - create remote session records
 - send session heartbeat updates
 - mark disconnected clients
+- generic `supabase_post_upsert()` shared by USB port telemetry, manual `/ports` toggles, and battery telemetry
 
 Implementation:
-- [main/net_diag.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\net_diag.c)
-- [main/supabase_client.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\supabase_client.c)
+- [main/net_diag.c](c:\cp\esp32-wifi-ap-cp\main\net_diag.c)
+- [main/supabase_client.c](c:\cp\esp32-wifi-ap-cp\main\supabase_client.c)
+
+### 5.7 RFID Activation Subsystem
+
+The RFID subsystem physically gates the charging hardware.
+
+Main functions:
+- poll the MFRC522 reader over SPI3
+- accept presence only for cards on the authorized 4-byte NUID list
+- drive the 6 power-control GPIOs (4 MOSFETs + SSR + relay)
+- expose a battery-driven override that forces ports off in Critical state
+
+Implementation:
+- [main/rfid_reader.c](c:\cp\esp32-wifi-ap-cp\main\rfid_reader.c)
+
+### 5.8 Battery Sensing and State Machine Subsystem
+
+Reads battery voltage from a resistor divider on GPIO 32 and runs the operational-threshold state machine.
+
+Main functions:
+- ADC1 channel 4 sampling with line/curve calibration
+- voltage → percent estimator (linear over 11.6–13.6 V)
+- five-state machine (`Normal / Warning / Critical / Wake Up / Charging On`) with 30 s debounce and hysteresis
+- side effects: toggle the user AP via `set_user_ap_enabled()`, toggle RFID port allow via `rfid_reader_set_ports_allowed()`
+- 5 s Supabase upsert of `battery_percent`, `battery_voltage_v`, `battery_raw_mv`, `battery_state`
+
+Open work:
+- Voltage thresholds and the linear curve don't yet match the thesis spec percentages
+- Firmware-side action for the 10 % shutdown step is missing (delegated to MPPT)
+
+Implementation:
+- [main/battery_sensor.c](c:\cp\esp32-wifi-ap-cp\main\battery_sensor.c)
+
+### 5.9 USB Port Sensing Subsystem (INA219)
+
+Measures USB port current and bus voltage to classify each port as `available` or `in_use`.
+
+Main functions:
+- I2C bus on SDA=21 / SCL=22, 100 kHz, external pull-ups on the breakouts
+- Four INA219s mapped per port_key (USB-C 1 / USB-C 2 / USB-A 1 / USB-A 2)
+- Event-driven Supabase sync: pushes on status flip, plus 30 s heartbeat per port
+- Live readings exposed at `/api/ports/sensors`; one-shot sync at `POST /api/ports/sensors/sync`; bus scan at `/api/ports/i2c-scan`
+
+Hardware caveats:
+- USB-C INA219s at 0x40 and 0x41 are reported faulty on the current PCB rev
+- The live `/port-occupied` page intentionally only renders USB-A 1 and USB-A 2
+
+Implementation:
+- [main/port_sensors.c](c:\cp\esp32-wifi-ap-cp\main\port_sensors.c)
+- [main/admin_ports.c](c:\cp\esp32-wifi-ap-cp\main\admin_ports.c)
+
+### 5.10 AC Outlet Sensing Subsystem (PZEM-004T v1)
+
+Reads AC mains telemetry from a Peacefair PZEM-004T v1 over UART2.
+
+Main functions:
+- 7-byte command / 7-byte response binary protocol (default device address 192.168.1.1)
+- Sequential queries for voltage / current / power / cumulative energy every 5 s
+- Logs readings to the serial console
+
+Open work:
+- Map current/power to `port_state.outlet` `available`/`in_use`
+- Decide schema location (extend `station_state` or add a new table) for AC voltage / power / energy and push on the same cadence
+
+Implementation:
+- [main/pzem_reader.c](c:\cp\esp32-wifi-ap-cp\main\pzem_reader.c)
+
+### 5.11 Eco Metrics Subsystem (stub)
+
+Per-port energy accumulator that integrates current × voltage × time into watt-hours, then converts to grams CO₂ saved using a configurable grid emission factor.
+
+Status:
+- Module is wired in but `ECO_METRICS_ENABLED=0`
+- The PWA fakes CO₂ savings client-side from `portsInUseCount × 3.5 g`
+
+Implementation:
+- [main/eco_metrics.c](c:\cp\esp32-wifi-ap-cp\main\eco_metrics.c)
 
 ## 6. Runtime Flow
 
@@ -260,10 +349,14 @@ On startup, the firmware performs the following sequence:
 3. load persisted configuration
 4. restore port map entries
 5. initialize Wi-Fi in AP or AP+STA mode
-6. start diagnostics and LED status thread
-7. start DNS and HTTP services if unlocked
-8. register CLI commands
-9. enter console loop
+6. start the port sensor task and its Supabase sync loop (gated on `PORT_SENSORS_ENABLED`)
+7. start the RFID polling task
+8. start the PZEM-004T reader task
+9. start the battery sensor task (ADC + state machine + Supabase upsert)
+10. start diagnostics and the LED status thread
+11. start DNS and HTTP services if unlocked
+12. register CLI commands
+13. enter console loop
 
 ### 6.2 User Flow A: On-Site Network Connectivity
 
@@ -333,33 +426,33 @@ sequenceDiagram
 
 ### 8.1 Core Firmware Components
 
-- [main/esp32_nat_router.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\esp32_nat_router.c)
+- [main/esp32_nat_router.c](c:\cp\esp32-wifi-ap-cp\main\esp32_nat_router.c)
   Entry point, Wi-Fi lifecycle, NVS bootstrap, SPIFFS bootstrap, DNS and HTTP service startup.
 
-- [main/http_server.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\http_server.c)
+- [main/http_server.c](c:\cp\esp32-wifi-ap-cp\main\http_server.c)
   Captive portal logic, admin HTTP interface, session management, connected page generation, dashboard handoff, and Supabase synchronization triggers.
 
-- [main/dns_server.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\dns_server.c)
+- [main/dns_server.c](c:\cp\esp32-wifi-ap-cp\main\dns_server.c)
   DNS hijack behavior for unauthenticated users and upstream DNS forwarding for authenticated users.
 
-- [main/net_diag.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\net_diag.c)
+- [main/net_diag.c](c:\cp\esp32-wifi-ap-cp\main\net_diag.c)
   Runtime diagnostics and active connectivity probes.
 
-- [main/supabase_client.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\supabase_client.c)
+- [main/supabase_client.c](c:\cp\esp32-wifi-ap-cp\main\supabase_client.c)
   HTTPS calls for remote session persistence and heartbeat updates.
 
 ### 8.2 Supporting Components
 
-- [components/cmd_router/cmd_router.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\components\cmd_router\cmd_router.c)
+- [components/cmd_router/cmd_router.c](c:\cp\esp32-wifi-ap-cp\components\cmd_router\cmd_router.c)
   Router-specific CLI commands.
 
-- [components/cmd_nvs/cmd_nvs.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\components\cmd_nvs\cmd_nvs.c)
+- [components/cmd_nvs/cmd_nvs.c](c:\cp\esp32-wifi-ap-cp\components\cmd_nvs\cmd_nvs.c)
   Generic NVS management commands.
 
-- [components/cmd_system/cmd_system.c](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\components\cmd_system\cmd_system.c)
+- [components/cmd_system/cmd_system.c](c:\cp\esp32-wifi-ap-cp\components\cmd_system\cmd_system.c)
   System and device diagnostics commands.
 
-- [main/pages.h](c:\Users\Phoebe Rhone Gangoso\Downloads\esp32-wifi-ap-cp\main\pages.h)
+- [main/pages.h](c:\cp\esp32-wifi-ap-cp\main\pages.h)
   Embedded HTML for the admin/config interface.
 
 ## 9. Storage Architecture
@@ -389,6 +482,20 @@ RAM-only runtime state includes:
 - current AP and STA IP information
 - heartbeat task state
 - current NAPT state
+- battery state-machine label and per-state debounce counters
+- per-port `last_pushed_status` and `last_pushed_ts_ms` (used for event-driven INA219 sync)
+- last successful PZEM read
+
+### 9.4 Supabase Telemetry Tables
+
+- `sessions` — captive portal session lifecycle and `installation_id` linkage
+- `port_state` — one row per `(station_id, port_key)`; current/bus voltage from INA219; outlet still driven by `/ports` toggle
+- `station_state` — single row per station with battery telemetry: `battery_percent`, `battery_voltage_v`, `battery_raw_mv`, `battery_state`, `updated_at`
+
+Migrations are tracked in `supabase/`:
+- `001_schema.sql` — current authoritative schema
+- `002_port_state_sensor_metrics.sql` — adds `current_ma` and `bus_voltage_v` to `port_state`
+- `003_station_state_battery_telemetry.sql` — adds `battery_voltage_v`, `battery_raw_mv`, `battery_state` to `station_state`
 
 ## 10. Security and Access Model
 
@@ -424,24 +531,33 @@ Known limitations in the present implementation:
 ### 11.1 Implemented in Current Repository
 
 - SoftAP with captive portal onboarding
-- optional STA uplink
+- optional STA uplink (kept up across all non-shutdown battery states for telemetry)
 - DNS interception for captive portal behavior
+- Per-client lwIP IPv4 input hook + ACL for strict per-client egress
+- DHCP option 114 portal advertisement
 - HTTP portal and admin interface
-- session timer and session status API
+- session timer, daily-quota table (NVS-backed), and session status API
 - external dashboard handoff
 - Supabase session synchronization hooks
 - CLI configuration and diagnostics
+- RFID-based physical activation using MFRC522 (with battery override)
+- USB port current/voltage sensing via INA219 (USB-A 1/2 working; USB-C 1/2 PCB-faulty)
+- Battery ADC reading + voltage-driven state machine with hysteresis and 30 s debounce
+- Battery telemetry to Supabase (`battery_percent`, `battery_voltage_v`, `battery_raw_mv`, `battery_state`)
+- AC outlet read via PZEM-004T v1 (logging only — Supabase pipeline not yet wired)
+- Coordinated power state: state machine drives `set_user_ap_enabled()` and `rfid_reader_set_ports_allowed()`
 
 ### 11.2 Planned or External to This Repository
 
-- RFID-based physical activation using MFRC522
-- charging-port availability sensing
-- current draw monitoring per port
-- battery and solar telemetry
-- eco-achievement and CO2 savings calculations
-- campus announcements module in the PWA
-- complete context-aware remote dashboard experience
-- robust reboot recovery for active sessions
+- PZEM AC telemetry pipeline into Supabase (`port_state.outlet` and AC voltage/power/energy)
+- Battery threshold calibration to match the thesis spec percentages (currently mismatched — see PROJECT_CONTEXT.md)
+- LiFePO4-shaped SoC curve (replace the linear 11.6–13.6 V mapping)
+- Firmware-side graceful shutdown action at 10 % (currently delegated to MPPT cut)
+- Eco-achievement and CO₂ savings calculations driven by real INA219/PZEM data (`eco_metrics.c` is wired but disabled)
+- Robust reboot recovery for active sessions
+- USB-C INA219 PCB rev fix to enable live USB-C readings
+- Campus announcements module in the PWA
+- Complete context-aware remote dashboard experience
 
 ## 12. Recommended Architectural Boundary
 
@@ -486,11 +602,11 @@ Best suited for:
 
 ## 13. Conclusion
 
-The current codebase already provides a strong architecture for the `connectivity and access-control` portion of the Smart Solar Hub. Its strongest implemented area is the local captive portal and managed Wi-Fi flow.
+The current codebase covers most of the Smart Solar Hub's embedded responsibilities. The captive portal and per-client gating remain the most polished surface, but the firmware now also drives RFID activation, USB INA219 telemetry, AC reading via PZEM-004T, and a battery-driven operational-threshold state machine that toggles the user AP and the RFID-controlled ports.
 
-However, the complete thesis system is larger than the current firmware. The architecture should therefore be understood as a multi-layer platform in which this repository is the embedded networking core, while the charging, sensing, and richer dashboard features remain either future integration work or external system components.
+Remaining firmware work is narrow but pointed: calibrate the battery thresholds to match the thesis-spec percentages, replace the linear `voltage → percent` curve with a LiFePO4-shaped lookup, push PZEM data into Supabase, add a firmware-side graceful-shutdown action, and turn the eco-metrics module on so CO₂ savings reflect real energy. The PWA in the sibling repo should evolve to render the new `battery_state`, `battery_voltage_v`, and (once wired) AC fields.
 
-For the current PWA-linking direction, the most important architectural rule is:
+For the current PWA-linking direction, the most important architectural rule is unchanged:
 - the first successful redirect link is the one-time bind
 - later visits should resolve by `installation_id` and `device_hash`
 - the local `http://192.168.4.1/` page is the manual recovery path when the user missed the first redirect link

@@ -1,4 +1,5 @@
 #include "admin_ports.h"
+#include "battery_sensor.h"
 #include "port_sensors.h"
 #include "supabase_client.h"
 
@@ -326,6 +327,136 @@ static const char *PORT_OCCUPIED_HTML =
     "</script></body></html>";
 
 /* ------------------------------------------------------------------------
+ * /battery-health — live battery sensor diagnostics
+ *
+ * Polls /api/battery/health and renders voltage / percent / state plus
+ * the state-machine threshold ladder so you can see exactly where the
+ * current voltage sits relative to each transition.
+ * ------------------------------------------------------------------------ */
+static const char *BATTERY_HEALTH_HTML =
+    "<!DOCTYPE html><html lang='en'><head>"
+    "<meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>Battery Health</title>"
+    "<style>"
+    "*{box-sizing:border-box}"
+    "body{margin:0;padding:24px 16px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
+    "background:#F5F0EB;color:#521B1B;min-height:100vh}"
+    ".wrap{max-width:480px;margin:0 auto}"
+    "h1{font-size:24px;margin:0 0 6px;letter-spacing:-0.01em}"
+    ".sub{color:#6F1D1B;font-size:13px;margin:0 0 22px;opacity:0.75;line-height:1.45}"
+    ".card{background:#fff;border-radius:18px;padding:18px 20px;margin-bottom:14px;"
+    "box-shadow:0 6px 20px rgba(82,27,27,0.08);border:1px solid rgba(82,27,27,0.06)}"
+    ".card h2{margin:0 0 12px;font-size:13px;font-weight:700;color:#521B1B;letter-spacing:0.05em;text-transform:uppercase}"
+    ".big{font-size:42px;font-weight:700;letter-spacing:-0.02em;line-height:1.1;font-variant-numeric:tabular-nums}"
+    ".big .unit{font-size:18px;font-weight:600;opacity:0.6;margin-left:6px}"
+    ".pill{display:inline-block;margin-top:10px;padding:6px 14px;border-radius:999px;font-size:13px;font-weight:700;"
+    "text-transform:uppercase;letter-spacing:0.04em}"
+    ".pill.normal{background:#dcfce7;color:#166534}"
+    ".pill.warning{background:#fef3c7;color:#92400e}"
+    ".pill.critical{background:#fee2e2;color:#991b1b}"
+    ".pill.wake_up,.pill.charging_on{background:#dbeafe;color:#1e40af}"
+    ".pill.unknown{background:#e5e7eb;color:#374151}"
+    ".row{display:flex;justify-content:space-between;padding:8px 0;font-size:13px;border-bottom:1px solid rgba(82,27,27,0.06)}"
+    ".row:last-child{border-bottom:0}"
+    ".row .k{opacity:0.65}"
+    ".row .v{font-weight:600;font-variant-numeric:tabular-nums}"
+    ".ladder{display:flex;flex-direction:column;gap:6px;font-variant-numeric:tabular-nums}"
+    ".tick{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;font-size:13px}"
+    ".tick.above{background:#dcfce7;color:#166534}"
+    ".tick.below{background:#fee2e2;color:#991b1b}"
+    ".tick .vv{min-width:64px;font-weight:700}"
+    ".tick .lbl{flex:1;font-size:12px;opacity:0.85}"
+    ".cursor{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:#521B1B;color:#fff;font-weight:700;font-size:13px}"
+    ".cursor::before{content:'\\25B6';font-size:11px}"
+    ".error{color:#991b1b;background:#fee2e2;padding:10px 14px;border-radius:10px;font-size:13px;margin-bottom:14px;display:none}"
+    ".footer{color:#6F1D1B;font-size:12px;opacity:0.6;margin-top:8px;text-align:center}"
+    "</style></head><body>"
+    "<div class='wrap'>"
+    "<h1>Battery Health</h1>"
+    "<p class='sub'>Live ADC readings from GPIO 32 through the resistor divider. Refreshes every 1.5 s.</p>"
+    "<div id='err' class='error'></div>"
+    "<div class='card'>"
+    "<h2>Current</h2>"
+    "<div class='big'><span id='voltage'>&mdash;</span><span class='unit'>V</span></div>"
+    "<span id='state' class='pill unknown'>&mdash;</span>"
+    "<div style='margin-top:12px'>"
+    "<div class='row'><span class='k'>State of charge</span><span class='v' id='percent'>&mdash;</span></div>"
+    "<div class='row'><span class='k'>Raw ADC at GPIO</span><span class='v' id='raw'>&mdash;</span></div>"
+    "</div>"
+    "</div>"
+    "<div class='card'>"
+    "<h2>State machine ladder</h2>"
+    "<div class='ladder' id='ladder'></div>"
+    "</div>"
+    "<div class='card'>"
+    "<h2>Hardware config</h2>"
+    "<div class='row'><span class='k'>ADC pin</span><span class='v' id='gpio'>&mdash;</span></div>"
+    "<div class='row'><span class='k'>Divider ratio</span><span class='v' id='ratio'>&mdash;</span></div>"
+    "<div class='row'><span class='k'>Full / empty curve</span><span class='v' id='full_empty'>&mdash;</span></div>"
+    "</div>"
+    "<div class='footer' id='ftr'>connecting&hellip;</div>"
+    "</div>"
+    "<script>"
+    "var LABELS={normal:'Normal',warning:'Warning',critical:'Critical',wake_up:'Wake Up',charging_on:'Charging On',unknown:'Unknown'};"
+    "function fmt(n,d){return (typeof n==='number'?n:0).toFixed(d);}"
+    "function renderLadder(curV, t){"
+    "var rows=["
+    "{v:t.full_v,lbl:'Full charge'},"
+    "{v:t.normal_rise_v,lbl:'Charging On / Warning -> Normal (rising)'},"
+    "{v:t.charging_rise_v,lbl:'Critical / Wake Up -> Charging On (rising)'},"
+    "{v:t.warning_fall_v,lbl:'Normal -> Warning (falling)'},"
+    "{v:t.wakeup_low_v,lbl:'Wake Up boot threshold'},"
+    "{v:t.critical_fall_v,lbl:'Warning -> Critical (falling)'},"
+    "{v:t.empty_v,lbl:'Empty / hardware MPPT shutdown'}"
+    "];"
+    "var html='';"
+    "var inserted=false;"
+    "for(var i=0;i<rows.length;i++){"
+    "var r=rows[i];"
+    "if(!inserted && curV >= r.v){"
+    "html+=\"<div class='cursor'>\"+fmt(curV,2)+\" V (now)</div>\";"
+    "inserted=true;"
+    "}"
+    "var cls=(curV >= r.v)?'above':'below';"
+    "html+=\"<div class='tick \"+cls+\"'><span class='vv'>\"+fmt(r.v,2)+\" V</span>\"+"
+    "\"<span class='lbl'>\"+r.lbl+\"</span></div>\";"
+    "}"
+    "if(!inserted){"
+    "html+=\"<div class='cursor'>\"+fmt(curV,2)+\" V (now)</div>\";"
+    "}"
+    "document.getElementById('ladder').innerHTML=html;"
+    "}"
+    "async function tick(){"
+    "try{"
+    "var r=await fetch('/api/battery/health',{cache:'no-store'});"
+    "var j=await r.json();"
+    "if(!j.ok)throw new Error(j.error||'read failed');"
+    "document.getElementById('err').style.display='none';"
+    "document.getElementById('voltage').textContent=fmt(j.voltage_v,2);"
+    "document.getElementById('percent').textContent=fmt(j.percent,0)+' %';"
+    "document.getElementById('raw').textContent=j.raw_mv+' mV';"
+    "var pill=document.getElementById('state');"
+    "var s=j.state||'unknown';"
+    "pill.className='pill '+s;"
+    "pill.textContent=LABELS[s]||s;"
+    "var c=j.config||{};"
+    "document.getElementById('gpio').textContent='GPIO '+(c.gpio||'?');"
+    "document.getElementById('ratio').textContent=(typeof c.divider_ratio==='number'?c.divider_ratio.toFixed(4):'-')+' \\u00D7';"
+    "document.getElementById('full_empty').textContent=fmt(c.full_v,1)+' V / '+fmt(c.empty_v,1)+' V';"
+    "if(c.thresholds)renderLadder(j.voltage_v,Object.assign({full_v:c.full_v,empty_v:c.empty_v},c.thresholds));"
+    "document.getElementById('ftr').textContent='updated '+new Date().toLocaleTimeString();"
+    "}catch(e){"
+    "var ee=document.getElementById('err');"
+    "ee.textContent='Read failed: '+e.message;"
+    "ee.style.display='block';"
+    "document.getElementById('ftr').textContent='retrying...';"
+    "}"
+    "}"
+    "tick();setInterval(tick,1500);"
+    "</script></body></html>";
+
+/* ------------------------------------------------------------------------
  * Handlers
  * ------------------------------------------------------------------------ */
 static esp_err_t ports_page_handler(httpd_req_t *req)
@@ -340,6 +471,13 @@ static esp_err_t port_occupied_page_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_send(req, PORT_OCCUPIED_HTML, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t battery_health_page_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_send(req, BATTERY_HEALTH_HTML, HTTPD_RESP_USE_STRLEN);
 }
 
 static esp_err_t send_json_err(httpd_req_t *req, const char *code, const char *msg)
@@ -564,6 +702,75 @@ static esp_err_t api_battery_handler(httpd_req_t *req)
     return send_json_err(req, "502 Bad Gateway", "supabase post failed");
 }
 
+/* GET /api/battery/health
+ *
+ * Reads the battery sensor on demand and returns the current voltage,
+ * percent, raw ADC reading, state-machine label, and the static config
+ * (GPIO, divider ratio, full/empty voltages, transition thresholds).
+ *
+ * Calling battery_sensor_read() from the HTTP task is safe: ESP-IDF's
+ * ADC oneshot driver serializes reads internally, and the state-machine
+ * task only mutates s_state from its own context — this handler reads
+ * s_state but does not write it. */
+static esp_err_t api_battery_health_handler(httpd_req_t *req)
+{
+    battery_reading_t r = {0};
+    esp_err_t err = battery_sensor_read(&r);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, OPTIONS");
+
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"enabled\":false,"
+            "\"error\":\"battery sensor compiled out (BATTERY_SENSOR_ENABLED=0)\"}");
+    }
+    if (err == ESP_ERR_INVALID_STATE) {
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"enabled\":true,"
+            "\"error\":\"battery sensor not initialized yet\"}");
+    }
+    if (err != ESP_OK) {
+        char body[160];
+        snprintf(body, sizeof(body),
+                 "{\"ok\":false,\"enabled\":true,\"error\":\"adc read failed: %s\"}",
+                 esp_err_to_name(err));
+        httpd_resp_set_status(req, "502 Bad Gateway");
+        return httpd_resp_sendstr(req, body);
+    }
+
+    char body[640];
+    snprintf(body, sizeof(body),
+             "{\"ok\":true,\"enabled\":true,\"valid\":%s,"
+             "\"voltage_v\":%.3f,\"percent\":%.1f,\"raw_mv\":%d,"
+             "\"state\":\"%s\","
+             "\"config\":{"
+             "\"gpio\":%d,\"divider_ratio\":%.4f,"
+             "\"full_v\":%.2f,\"empty_v\":%.2f,"
+             "\"thresholds\":{"
+             "\"warning_fall_v\":%.2f,"
+             "\"critical_fall_v\":%.2f,"
+             "\"wakeup_low_v\":%.2f,"
+             "\"charging_rise_v\":%.2f,"
+             "\"normal_rise_v\":%.2f"
+             "}}}",
+             r.valid ? "true" : "false",
+             (double)r.voltage_v, (double)r.percent, r.raw_mv,
+             battery_state_name(r.state),
+             BATTERY_SENSOR_GPIO,
+             (double)BATTERY_VOLTAGE_DIVIDER_RATIO,
+             (double)BATTERY_VOLTAGE_FULL_V,
+             (double)BATTERY_VOLTAGE_EMPTY_V,
+             (double)BATTERY_V_WARNING_FALL,
+             (double)BATTERY_V_CRITICAL_FALL,
+             (double)BATTERY_V_WAKEUP_BOOT_LOW,
+             (double)BATTERY_V_CHARGING_RISE,
+             (double)BATTERY_V_NORMAL_RISE);
+    return httpd_resp_sendstr(req, body);
+}
+
 void admin_ports_register_handlers(httpd_handle_t server)
 {
     if (server == NULL) {
@@ -583,6 +790,12 @@ void admin_ports_register_handlers(httpd_handle_t server)
         .handler = port_occupied_page_handler,
         .user_ctx = NULL,
     };
+    static const httpd_uri_t battery_health_uri = {
+        .uri = "/battery-health",
+        .method = HTTP_GET,
+        .handler = battery_health_page_handler,
+        .user_ctx = NULL,
+    };
     static const httpd_uri_t ports_api_uri = {
         .uri = "/api/ports",
         .method = HTTP_POST,
@@ -593,6 +806,12 @@ void admin_ports_register_handlers(httpd_handle_t server)
         .uri = "/api/battery",
         .method = HTTP_POST,
         .handler = api_battery_handler,
+        .user_ctx = NULL,
+    };
+    static const httpd_uri_t battery_health_api_uri = {
+        .uri = "/api/battery/health",
+        .method = HTTP_GET,
+        .handler = api_battery_health_handler,
         .user_ctx = NULL,
     };
     static const httpd_uri_t i2c_scan_api_uri = {
@@ -616,8 +835,10 @@ void admin_ports_register_handlers(httpd_handle_t server)
 
     register_admin_uri_checked(server, &page_uri);
     register_admin_uri_checked(server, &port_occupied_uri);
+    register_admin_uri_checked(server, &battery_health_uri);
     register_admin_uri_checked(server, &ports_api_uri);
     register_admin_uri_checked(server, &battery_api_uri);
+    register_admin_uri_checked(server, &battery_health_api_uri);
     register_admin_uri_checked(server, &i2c_scan_api_uri);
     register_admin_uri_checked(server, &sensor_readings_api_uri);
     register_admin_uri_checked(server, &sensor_sync_api_uri);

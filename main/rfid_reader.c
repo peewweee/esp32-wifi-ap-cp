@@ -297,8 +297,16 @@ static void power_pins_init(void)
     s_ports_active = false;
 }
 
+/* Master gate set by the battery state machine. When false, the RFID
+ * task is forbidden from energizing the power pins regardless of card
+ * presence. Default true so RFID works normally on a healthy battery. */
+static volatile bool s_ports_allowed_by_battery = true;
+
 static void set_power_state(bool on)
 {
+    if (on && !s_ports_allowed_by_battery) {
+        on = false;  /* battery says no, override to off */
+    }
     if (s_ports_active == on) {
         return;
     }
@@ -311,6 +319,21 @@ static void set_power_state(bool on)
     } else {
         ESP_LOGI(TAG, "CARD ABSENT/UNAUTHORIZED: all power outputs OFF");
     }
+}
+
+void rfid_reader_set_ports_allowed(bool allowed)
+{
+    if (s_ports_allowed_by_battery == allowed) {
+        return;
+    }
+    s_ports_allowed_by_battery = allowed;
+    ESP_LOGI(TAG, "battery override: ports %s",
+             allowed ? "ALLOWED (RFID controls)" : "BLOCKED (force off)");
+    if (!allowed && s_ports_active) {
+        set_power_state(false);
+    }
+    /* When re-allowed, the RFID poll loop will turn ports back on the
+     * next time it sees the authorized card; nothing to do here. */
 }
 
 static void rfid_task(void *arg)

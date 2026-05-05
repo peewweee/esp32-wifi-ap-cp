@@ -37,6 +37,24 @@ extern "C" {
 #define BATTERY_SENSOR_SUPABASE_SYNC_ENABLED 1
 #endif
 
+/* Enforce the battery-driven side effects on the user AP and the
+ * RFID-controlled charging ports.
+ *   1 (default): full thesis behavior — at <13.2 V the user AP is
+ *                disabled, at <11.8 V the charging ports are blocked,
+ *                etc.
+ *   0 (dev):     telemetry still runs (voltage, percent, state, and
+ *                Supabase upsert all work), but the AP and RFID-port
+ *                gate are NEVER touched by the state machine. Use this
+ *                when running on a 12 V bench supply that would
+ *                otherwise leave the AP off.
+ *
+ * Override via top-level .env:
+ *   BATTERY_SENSOR_ENFORCE_THRESHOLDS=0
+ */
+#ifndef BATTERY_SENSOR_ENFORCE_THRESHOLDS
+#define BATTERY_SENSOR_ENFORCE_THRESHOLDS 1
+#endif
+
 /* GPIO 32 = ADC1 channel 4 on ESP32. */
 #define BATTERY_SENSOR_GPIO              32
 
@@ -48,33 +66,80 @@ extern "C" {
 #define BATTERY_VOLTAGE_DIVIDER_RATIO    5.5454f
 #endif
 
-/* Lead-acid 12 V curve. Override these if you're using LiFePO4
- * (4S = 12.8 V nominal, full ~14.4 V, empty ~10.0 V) or another chemistry. */
+/* Battery curve calibrated to the project's threshold table:
+ *   Normal     13.6 V – 12.8 V  (100% – 26%)
+ *   Warning    ~12.6 V          (25%, falling)   user AP off
+ *   Critical   ~11.8 V          (15%, falling)   ports off
+ *   Shutdown   11.6 V           (10%, hardware MPPT cut)
+ *   Wake Up    ~12.4 V          (13%, recovering after MPPT recovery)
+ *   Charging   ~12.8 V          (20%, recovering, ports back on)
+ *   Full Svc   13.2 V           (30%, recovering, user AP back on)
+ *
+ * Percentage is linearly mapped between FULL_V and EMPTY_V so the
+ * dashboard's "%" matches the table above. */
 #ifndef BATTERY_VOLTAGE_FULL_V
-#define BATTERY_VOLTAGE_FULL_V           12.7f
+#define BATTERY_VOLTAGE_FULL_V           13.6f
 #endif
 #ifndef BATTERY_VOLTAGE_EMPTY_V
-#define BATTERY_VOLTAGE_EMPTY_V          10.5f
+#define BATTERY_VOLTAGE_EMPTY_V          11.6f
+#endif
+
+/* State-machine voltage thresholds (volts).
+ * Falling thresholds are LOWER than rising ones for the same feature so
+ * the system has hysteresis and doesn't flap when voltage hovers. */
+#define BATTERY_V_WARNING_FALL           12.6f   /* Normal -> Warning */
+#define BATTERY_V_CRITICAL_FALL          11.8f   /* Warning -> Critical */
+#define BATTERY_V_WAKEUP_BOOT_LOW        12.4f   /* boot threshold for Wake Up */
+#define BATTERY_V_CHARGING_RISE          12.8f   /* Critical/Wake Up -> Charging On */
+#define BATTERY_V_NORMAL_RISE            13.2f   /* Charging On / Warning -> Normal */
+
+/* How many consecutive samples must agree before we change state.
+ * 6 samples × 5 s = 30 s of debouncing — a phone plugging in dips
+ * voltage briefly, but won't sustain that for half a minute. */
+#ifndef BATTERY_DEBOUNCE_SAMPLES
+#define BATTERY_DEBOUNCE_SAMPLES         6
+#endif
+
+/* On boot, take this many quick samples (with shorter delay) before
+ * deciding which state to enter. Avoids reacting to a single noisy
+ * reading at power-up. */
+#ifndef BATTERY_BOOT_SAMPLES
+#define BATTERY_BOOT_SAMPLES             5
+#endif
+#ifndef BATTERY_BOOT_SAMPLE_DELAY_MS
+#define BATTERY_BOOT_SAMPLE_DELAY_MS     500
 #endif
 
 #ifndef BATTERY_SENSOR_SYNC_INTERVAL_MS
-#define BATTERY_SENSOR_SYNC_INTERVAL_MS  10000   /* 10 s */
+#define BATTERY_SENSOR_SYNC_INTERVAL_MS  5000    /* 5 s — matches debounce design */
 #endif
 
 #ifndef BATTERY_SENSOR_SAMPLES
 #define BATTERY_SENSOR_SAMPLES           16      /* averaged per read for noise reduction */
 #endif
 
+typedef enum {
+    BATTERY_STATE_NORMAL = 0,
+    BATTERY_STATE_WARNING,
+    BATTERY_STATE_CRITICAL,
+    BATTERY_STATE_WAKE_UP,
+    BATTERY_STATE_CHARGING_ON,
+} battery_state_t;
+
 typedef struct {
-    float    voltage_v;          /* battery voltage at the terminals, V */
-    float    percent;            /* estimated state-of-charge, 0.0 - 100.0 */
-    int      raw_mv;             /* raw ADC voltage at GPIO 32, mV (post-calibration) */
-    bool     valid;
+    float           voltage_v;   /* battery voltage at the terminals, V */
+    float           percent;     /* estimated state-of-charge, 0.0 - 100.0 */
+    int             raw_mv;      /* raw ADC voltage at GPIO 32, mV (post-calibration) */
+    battery_state_t state;       /* current state-machine label */
+    bool            valid;
 } battery_reading_t;
 
 esp_err_t battery_sensor_init(void);
 esp_err_t battery_sensor_read(battery_reading_t *out);
 esp_err_t battery_sensor_start(void);
+
+const char *battery_state_name(battery_state_t state);
+battery_state_t battery_sensor_current_state(void);
 
 #ifdef __cplusplus
 }
