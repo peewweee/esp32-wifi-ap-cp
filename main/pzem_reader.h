@@ -47,6 +47,17 @@ esp_err_t pzem_reader_init(void);
 esp_err_t pzem_reader_read(pzem_reading_t *out);
 esp_err_t pzem_reader_start(void);
 
+/* Copy the most recent successful PZEM reading into *out.
+ *
+ * Returns true iff the periodic pzem_task has completed at least one
+ * successful read since boot. Designed for HTTP / diagnostics callers
+ * that should NOT issue their own UART queries (concurrent reads with
+ * the periodic task would interleave bytes on UART2 and corrupt
+ * responses).
+ *
+ * The reading is at most PZEM_READ_INTERVAL_MS old (5 s by default). */
+bool pzem_reader_get_last(pzem_reading_t *out);
+
 #ifdef __cplusplus
 }
 #endif

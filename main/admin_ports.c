@@ -1,6 +1,7 @@
 #include "admin_ports.h"
 #include "battery_sensor.h"
 #include "port_sensors.h"
+#include "pzem_reader.h"
 #include "supabase_client.h"
 
 #include "esp_log.h"
@@ -571,7 +572,7 @@ static esp_err_t api_ports_sensor_readings_handler(httpd_req_t *req)
                              "port sensors disabled; build with PORT_SENSORS_ENABLED=1");
     }
 
-    char body[1280];
+    char body[1536];
     size_t off = 0;
     json_append(body, sizeof(body), &off,
                 "{\"ok\":%s,\"enabled\":%s,\"threshold_ma\":%.1f",
@@ -600,7 +601,31 @@ static esp_err_t api_ports_sensor_readings_handler(httpd_req_t *req)
                     port_sensors_status_string(r->status));
     }
 
-    json_append(body, sizeof(body), &off, "]}");
+    json_append(body, sizeof(body), &off, "]");
+
+    /* AC outlet snapshot from the PZEM-004T cache. The reader runs in its
+     * own task on UART2; we only return the last cached reading here so we
+     * never issue a UART query from the HTTP handler (concurrent reads
+     * would interleave bytes on the wire). The cache is at most
+     * PZEM_READ_INTERVAL_MS old (5 s by default). */
+    pzem_reading_t ac;
+    bool ac_valid = pzem_reader_get_last(&ac);
+    if (ac_valid) {
+        json_append(body, sizeof(body), &off,
+                    ",\"ac\":{\"valid\":true,"
+                    "\"voltage_v\":%.1f,\"current_a\":%.2f,"
+                    "\"power_w\":%.0f,\"energy_wh\":%u}",
+                    (double)ac.voltage_v,
+                    (double)ac.current_a,
+                    (double)ac.power_w,
+                    (unsigned)ac.energy_wh);
+    } else {
+        json_append(body, sizeof(body), &off,
+                    ",\"ac\":{\"valid\":false,"
+                    "\"error\":\"no PZEM reading yet\"}");
+    }
+
+    json_append(body, sizeof(body), &off, "}");
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");

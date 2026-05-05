@@ -17,6 +17,13 @@ static const char *TAG = "pzem";
 
 static bool s_initialized;
 
+/* Cache of the most recent successful read. Updated by pzem_task and
+ * snapshotted by HTTP handlers. Spinlock so the snapshot is atomic
+ * (struct copy under critical section). */
+static pzem_reading_t s_last_reading;
+static bool           s_last_reading_valid;
+static portMUX_TYPE   s_last_reading_lock = portMUX_INITIALIZER_UNLOCKED;
+
 /* PZEM-004T v1 default device address: 192.168.1.1 (4-byte IP-style). */
 static uint8_t s_v1_addr[4] = { 0xC0, 0xA8, 0x01, 0x01 };
 
@@ -108,6 +115,10 @@ static void pzem_task(void *pvParameters)
                      (double)r.current_a,
                      (double)r.power_w,
                      (unsigned)r.energy_wh);
+            portENTER_CRITICAL(&s_last_reading_lock);
+            s_last_reading = r;
+            s_last_reading_valid = true;
+            portEXIT_CRITICAL(&s_last_reading_lock);
         } else {
             ESP_LOGW(TAG, "PZEM read failed: %s", esp_err_to_name(err));
         }
@@ -241,5 +252,29 @@ esp_err_t pzem_reader_start(void)
 #else
     ESP_LOGI(TAG, "pzem_reader_start: compiled out (PZEM_ENABLED=0)");
     return ESP_OK;
+#endif
+}
+
+bool pzem_reader_get_last(pzem_reading_t *out)
+{
+    if (out == NULL) {
+        return false;
+    }
+
+#if PZEM_ENABLED
+    bool valid;
+    portENTER_CRITICAL(&s_last_reading_lock);
+    valid = s_last_reading_valid;
+    if (valid) {
+        *out = s_last_reading;
+    }
+    portEXIT_CRITICAL(&s_last_reading_lock);
+    if (!valid) {
+        memset(out, 0, sizeof(*out));
+    }
+    return valid;
+#else
+    memset(out, 0, sizeof(*out));
+    return false;
 #endif
 }

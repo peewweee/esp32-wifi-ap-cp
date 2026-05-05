@@ -345,9 +345,13 @@ static void rfid_task(void *arg)
     for (;;) {
         TickType_t now = xTaskGetTickCount();
 
+#if RFID_ENFORCE_AUTH
+        /* Production: cut power if the last authorized read is stale. In
+         * dev mode this block is skipped, so power stays on regardless. */
         if (s_ports_active && (now - last_valid_tick) > timeout_ticks) {
             set_power_state(false);
         }
+#endif
 
         if (picc_request_a()) {
             uint8_t uid[4] = {0};
@@ -363,11 +367,19 @@ static void rfid_task(void *arg)
                         if (s_cb) s_cb(true);
                     }
                 } else {
+#if RFID_ENFORCE_AUTH
                     set_power_state(false);
+#endif
                     if (!s_invalid_logged) {
                         ESP_LOGW(TAG,
-                                 "UNAUTHORIZED UID=%02X%02X%02X%02X — access denied",
-                                 uid[0], uid[1], uid[2], uid[3]);
+                                 "UNAUTHORIZED UID=%02X%02X%02X%02X — %s",
+                                 uid[0], uid[1], uid[2], uid[3],
+#if RFID_ENFORCE_AUTH
+                                 "access denied"
+#else
+                                 "ports left on (dev mode)"
+#endif
+                                );
                         s_invalid_logged = true;
                     }
                     if (s_card_present) {
@@ -404,6 +416,18 @@ esp_err_t rfid_reader_start(void)
      * MFRC522 fails to come up. */
     power_pins_init();
 
+#if !RFID_ENFORCE_AUTH
+    /* Dev mode: energize the power pins immediately so port testing
+     * works even if no MFRC522 is wired or no card is tapped. The
+     * battery override (s_ports_allowed_by_battery) still wins; in a
+     * typical bench setup the battery threshold action is also
+     * disabled, so the pins actually go high here. */
+    ESP_LOGW(TAG,
+             "dev mode (RFID_ENFORCE_AUTH=0): forcing power pins on, "
+             "auth check bypassed");
+    set_power_state(true);
+#endif
+
     spi_bus_config_t bus = {
         .mosi_io_num = RFID_PIN_MOSI,
         .miso_io_num = RFID_PIN_MISO,
@@ -415,7 +439,11 @@ esp_err_t rfid_reader_start(void)
     esp_err_t err = spi_bus_initialize(RFID_SPI_HOST, &bus, SPI_DMA_CH_AUTO);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "spi_bus_initialize failed: %s", esp_err_to_name(err));
+#if !RFID_ENFORCE_AUTH
+        return ESP_OK;  /* dev mode: SPI failure isn't fatal, ports already on */
+#else
         return err;
+#endif
     }
 
     spi_device_interface_config_t dev = {
@@ -427,7 +455,11 @@ esp_err_t rfid_reader_start(void)
     err = spi_bus_add_device(RFID_SPI_HOST, &dev, &s_spi);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "spi_bus_add_device failed: %s", esp_err_to_name(err));
+#if !RFID_ENFORCE_AUTH
+        return ESP_OK;
+#else
         return err;
+#endif
     }
 
     gpio_reset_pin(RFID_PIN_RST);
@@ -437,7 +469,13 @@ esp_err_t rfid_reader_start(void)
     if (pcd_init_chip() != ESP_OK) {
         ESP_LOGW(TAG, "MFRC522 init failed; presence task will not start");
         s_hardware_ok = false;
+#if !RFID_ENFORCE_AUTH
+        /* Dev mode: no reader is OK. Power pins were already set on
+         * above, so port testing still works. */
+        return ESP_OK;
+#else
         return ESP_FAIL;
+#endif
     }
     s_hardware_ok = true;
 

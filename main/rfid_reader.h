@@ -29,11 +29,35 @@ extern "C" {
  *   false and rfid_reader_start() is a logging no-op.
  */
 
+/* Enforce RFID card authorization.
+ *   1 (default): production behavior — ports turn on only when an
+ *                authorized UID is present and stay on as long as the
+ *                card is held within the 1 s presence timeout.
+ *   0 (dev):     ports are energized at boot and stay on. The MFRC522
+ *                polling task still runs so the serial log shows cards
+ *                as they are scanned, but neither card absence nor
+ *                unauthorized UIDs will turn the power pins off.
+ *                MFRC522 init failure is also non-fatal — the ports
+ *                still come up so port testing works without the
+ *                reader wired.
+ *
+ * Override via top-level .env:
+ *   RFID_ENFORCE_AUTH=0
+ *
+ * Battery override still wins: if the battery state machine forces
+ * ports off, dev mode does not override that. In a typical bench
+ * setup the battery threshold action is also disabled
+ * (BATTERY_SENSOR_ENFORCE_THRESHOLDS=0), so this is moot. */
+#ifndef RFID_ENFORCE_AUTH
+#define RFID_ENFORCE_AUTH 1
+#endif
+
 typedef void (*rfid_presence_cb_t)(bool card_present);
 
 /* Starts the SPI bus, configures the MFRC522, and launches the polling
  * task. Returns ESP_FAIL if the chip does not respond on VersionReg
- * (typically wiring or power). No-op when RFID_ENABLED is 0. */
+ * (typically wiring or power) — except in dev mode (RFID_ENFORCE_AUTH=0)
+ * where MFRC522 absence is non-fatal. No-op when RFID_ENABLED is 0. */
 esp_err_t rfid_reader_start(void);
 
 /* Whether an authorized card is currently considered present. */
