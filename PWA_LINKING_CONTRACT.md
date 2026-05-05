@@ -1,40 +1,23 @@
 # PWA Linking Contract
 
-This repo now uses a `one-time redirect link` to bind a browser installation to an ESP32-managed device identity.
+Last updated: 2026-05-06
 
-The important rule is:
-- `installation_id` is the long-lived PWA/browser identity
-- `device_hash` is the long-lived ESP32/backend identity for that client device
-- `session_token` identifies one access session, not the user forever
+This file documents the contract between this ESP32 firmware repo, Supabase, and the external PWA repo.
 
-The user should only need to complete the redirect-based bind once per browser installation, as long as browser storage is preserved and the firmware can continue to resolve a stable `device_hash` for that device.
+The PWA source is not in this repository. The ESP32 firmware is responsible for generating session/device identifiers and publishing raw station inputs. The PWA is responsible for persistent browser identity, dashboard rendering, and estimated CO2 savings.
 
-## Repo boundary
-
-This repository contains:
-- ESP32 firmware that creates `session_token`
-- ESP32 firmware that creates `device_hash`
-- Supabase SQL contract files used by the dashboard/backend integration
-- ESP32 firmware that pushes USB port telemetry (`port_state`) and battery telemetry (`station_state`)
-
-This repository does not contain:
-- the real Vercel PWA source code
-- the live dashboard implementation
-- the live Supabase edge/backend code outside the SQL files stored here
-
-This file therefore documents the expected contract that the PWA must implement.
-
-## Identity model
+## Identity Model
 
 ### `installation_id`
 
 Created by the PWA.
 
 Properties:
+- long-lived browser/PWA installation identity
 - generated on first app load
 - stored in persistent browser storage
-- scoped to one browser storage context
 - lost if browser storage is cleared
+- scoped to one browser profile/app install
 
 Recommended implementation:
 - generate with `crypto.randomUUID()`
@@ -45,230 +28,301 @@ Recommended implementation:
 Created by the ESP32 firmware.
 
 Properties:
-- intended to be stable for the same client device
-- used by Supabase to link later sessions back to the same browser install
-- should not require the user to re-link every new day
-
-Important limitation:
-- if the firmware cannot reliably determine the client MAC for a given path and falls back to IP-derived hashing, long-term linkage becomes weaker and may require relinking more often than desired
+- intended to identify the client device from the ESP32/backend side
+- derived from client MAC when available
+- weaker if firmware has to fall back to an IP-derived hash
+- used by Supabase to resolve future sessions for the same linked install
 
 ### `session_token`
 
-Created by the ESP32 firmware when internet access is granted for a session.
+Created by the ESP32 firmware when access is granted.
 
 Properties:
-- unique per session
-- passed to the one-time PWA linking route
-- should not be treated by the PWA as the long-term user identity
+- unique per access session
+- passed once to the PWA for linking
+- not a permanent user identity
+- should be removed from the visible URL after successful claim
 
-Important design rule:
-- the PWA should resolve the latest session through `installation_id -> device_hash -> latest relevant session`
-- the PWA should not require the user to keep opening tokenized URLs on every new day
+## Expected Routes
 
-## Expected routes
+Firmware currently links users to:
 
-Routes currently expected by the firmware:
-- Generic app: `https://solarconnect.live`
-- One-time link route: `https://solarconnect.live/?session_token=<token>`
+```text
+https://solarconnect.live/?session_token=<token>
+```
 
-Local recovery route served by the ESP32:
-- `http://192.168.4.1/`
+Generic PWA route:
 
-## PWA responsibilities
+```text
+https://solarconnect.live
+```
 
-### 1. Create and persist `installation_id`
+Local ESP32 recovery route:
 
-On first app load:
-1. check persistent storage for `installation_id`
-2. if missing, create one with `crypto.randomUUID()`
-3. store it locally
+```text
+http://192.168.4.1/
+```
 
-The PWA should treat this as the browser-install identity.
+## First-Time Linking Flow
 
-### 2. Generic dashboard route behavior
+1. User connects to `SOLAR CONNECT`.
+2. ESP32 captive portal opens or user manually visits `http://192.168.4.1/`.
+3. User accepts terms.
+4. ESP32 creates a `session_token` and `device_hash`.
+5. ESP32 shows the PWA link with `session_token`.
+6. PWA reads or creates `installation_id`.
+7. PWA calls `claim_session_link(session_token, installation_id)`.
+8. Supabase links the browser installation to the device/session identity.
+9. PWA redirects to the clean root route without the token.
 
-Route:
-- `https://solarconnect.live`
+Recommended clean redirect:
 
-Behavior:
-1. read `installation_id`
-2. call `resolve_installation_session(installation_id)`
-3. if a session is found, show the user's countdown/status
-4. if no session is found, show an unresolved state instead of guessing who the user is
+```text
+https://solarconnect.live
+```
 
-The unresolved state should explain that the app cannot automatically identify a never-linked user in a normal browser.
+## Returning User Flow
 
-Recommended unresolved-state UI:
-- message:
-  `Connect to SOLAR CONNECT to see your status.`
-- action:
-  `Open Solar Connect Portal`
-- target:
-  `http://192.168.4.1/`
-- helper text:
-  `If the page does not open, connect to SOLAR CONNECT first.`
+On a normal visit to `https://solarconnect.live`:
 
-### 3. One-time linking route behavior
+1. PWA reads `installation_id`.
+2. PWA calls `resolve_installation_session(installation_id)`.
+3. Supabase resolves the latest relevant session through the linked `device_hash`.
+4. PWA renders the current status/countdown if found.
+5. If no session is found, PWA shows an unresolved state.
 
-Route:
-- `https://solarconnect.live/?session_token=<token>`
+The PWA should not require a tokenized URL every day for the same browser/device.
 
-Behavior:
-1. read `session_token` from the URL
-2. read or create `installation_id`
-3. call `claim_session_link(session_token, installation_id)`
-4. after success, remove the token from the visible URL by redirecting to the clean app root route
+## Unresolved State
 
-Recommended redirect target after success:
-- `https://solarconnect.live`
+If the PWA cannot resolve a linked session, show instructions instead of guessing.
 
-Reason:
-- avoids leaving `session_token` in browser history, screenshots, or accidental shares
+Recommended wording:
 
-### 4. Countdown/status behavior
+```text
+Connect to SOLAR CONNECT to see your status.
+```
 
-When a session resolves successfully, the PWA should display at minimum:
-- `remaining_seconds`
-- `status`
-- enough UI context to tell the user whether time is active, disconnected, expired, or unavailable
+Recommended action:
 
-Recommended behavior:
-- tick the displayed countdown locally between refreshes
-- refresh from Supabase periodically
-- refresh when the app becomes visible again after backgrounding
+```text
+Open Solar Connect Portal
+```
 
-## Recovery flow for missed first-time linking
+Target:
 
-This is the recommended fallback when the user connected to `SOLAR CONNECT` but did not click the PWA redirect link the first time.
+```text
+http://192.168.4.1/
+```
 
-### PWA side
+Helper:
 
-If the generic dashboard cannot resolve a linked session:
-- show the unresolved-state message
-- show the manual link to `http://192.168.4.1/`
+```text
+If the page does not open, connect to SOLAR CONNECT first.
+```
 
-### ESP32 side
+## Browser Limitations
 
-When the user opens `http://192.168.4.1/` while connected to `SOLAR CONNECT`, the ESP32 should serve the local portal page.
+These are normal browser/PWA constraints:
 
-That local page should make it easy to:
-- confirm access if needed
-- see that the user is on `SOLAR CONNECT`
-- open the current unique PWA redirect link if linking is still needed
-
-Practical outcome:
-- users who missed the redirect link once still have a manual recovery path
-- this recovery path does not depend on the operating system showing the captive-portal popup again
-
-## Browser and privacy limitations
-
-These limitations are fundamental to normal browser/PWA behavior and should be treated as design constraints.
-
-- A normal PWA cannot read the device MAC address.
-- A normal PWA cannot reliably read the current Wi-Fi SSID or BSSID across browsers.
-- A normal PWA cannot obtain a stable hardware identifier for the user.
-- A normal HTTPS PWA cannot reliably probe `http://192.168.4.1/` in code due to mixed-content and local-network restrictions.
-- If browser storage is cleared, `installation_id` is lost.
-- If the user changes browser, they are effectively a new install.
-- If the user changes device, they are effectively a new install.
-
-Important implication:
-- the PWA cannot reliably auto-detect whether the user is currently connected to `SOLAR CONNECT`
-- the `Open Solar Connect Portal` action should be presented as a manual recovery link, not as a guaranteed connectivity detector
-
-## Captive portal popup limitation
-
-The firmware can provide captive-portal interception and a local portal at `192.168.4.1`, but it cannot guarantee that iOS, Android, Windows, or other operating systems will automatically show the captive-portal assistant every time the user reconnects.
-
-Reason:
-- operating systems cache network state
-- captive detection depends on OS-specific heuristics and probe behavior
+- the PWA cannot read the user's MAC address
+- the PWA cannot reliably read Wi-Fi SSID/BSSID
+- the PWA cannot access a stable hardware identifier
+- an HTTPS PWA cannot reliably probe `http://192.168.4.1/` in code
+- browser storage clear means `installation_id` is lost
+- browser/device changes require linking again
+- operating systems may not reopen the captive portal popup on every reconnect
 
 Therefore:
-- the auto-popup is a convenience only
-- the manual `http://192.168.4.1/` recovery path is required
+- the local portal link is a manual recovery path
+- captive portal popup behavior should be treated as a convenience, not a guaranteed entry point
 
-## Expected user experience
+## Firmware Session Contract
 
-### First-time user opens the generic QR before ever linking
+The ESP32 publishes session rows through Supabase REST.
 
-Expected behavior:
-- the PWA cannot know who they are yet
-- show instructions only
-- offer the `http://192.168.4.1/` recovery link
+Important fields:
+- `session_token`
+- `device_hash`
+- `remaining_seconds`
+- `status`
+- `ap_connected`
+- `last_heartbeat`
+- `session_start`
+- `session_end`
 
-### First-time user connects to `SOLAR CONNECT` and clicks the ESP32 redirect link
+Typical statuses:
+- `active`
+- `expired`
+- `disconnected`
 
-Expected behavior:
-- the PWA binds `installation_id` to the active session's `device_hash`
-- future sessions for the same device should resolve automatically without needing the token again
+Current firmware behavior:
+- daily quota is 3600 seconds per device/MAC
+- active sessions are RAM-only
+- quota records are NVS-backed
+- `DEV_RESET_QUOTA_ON_BOOT=1` clears quota on every ESP32 boot for dev testing
 
-### User connected before but forgot to click the redirect link
+PWA implication:
+- if the ESP32 reboots while the dev flag is on, Supabase may show a fresh quota/session path after the device comes back
+- production/demo firmware should use `DEV_RESET_QUOTA_ON_BOOT=0` if daily quota must survive power loss
 
-Expected behavior:
-- later opening the generic PWA should show the unresolved state
-- user taps `http://192.168.4.1/`
-- if connected to `SOLAR CONNECT`, the ESP32 local portal gives them the current redirect link/instructions
+## Station Telemetry Contract
 
-### Returning user later on the same browser/device
-
-Expected behavior:
-- opening the generic QR or dashboard route should resolve the latest relevant session automatically
-- no manual pairing code should be required
-- no token in the URL should be required again
-
-### Returning user after storage clear, browser change, or device change
-
-Expected behavior:
-- the PWA no longer has the old `installation_id`
-- the user must complete the one-time redirect-based link again
-
-## Implementation notes for the PWA
-
-Recommended dashboard states:
-- linked and active
-- linked but disconnected/stale
-- linked but expired
-- not linked yet
-- cannot resolve because user is not on the local Wi-Fi and has never linked before
-
-Recommended wording for the unresolved state:
-- `Connect to SOLAR CONNECT to see your status.`
-- `Open Solar Connect Portal`
-- `If the page does not open, connect to SOLAR CONNECT first.`
-
-Recommended wording for first-time instructions:
-- explain that the user must connect to `SOLAR CONNECT`
-- explain that they must open the local portal once and tap the app link
-- explain that after the first successful link, later visits to the generic dashboard should work automatically on the same browser/device
-
-## Station telemetry the PWA can read
-
-These tables are populated by the ESP32 firmware and are intended for direct read by the PWA dashboard. They are not part of the linking contract per se but are the other half of the data model the dashboard depends on.
+These tables are populated by the ESP32 firmware and can be read by the PWA dashboard.
 
 ### `station_state`
 
-Single row per `station_id` (default `solar-hub-01`). Battery telemetry pushed every 5 s by the ESP32 battery sensor task:
-- `battery_percent` — 0–100 (currently a linear estimate from `battery_voltage_v` over an 11.6–13.6 V window)
-- `battery_voltage_v` — battery terminal voltage in volts
-- `battery_raw_mv` — calibrated ADC reading at GPIO 32 in millivolts (diagnostic)
-- `battery_state` — one of `normal | warning | critical | wake_up | charging_on`
+One row per `station_id`, default:
+
+```text
+solar-hub-01
+```
+
+Battery fields published by the battery task:
+- `battery_percent`
+- `battery_voltage_v`
+- `battery_raw_mv`
+- `battery_state`
 - `updated_at`
 
-Notes for PWA implementers:
-- The PWA currently only reads `battery_percent` and `updated_at`. Surfacing `battery_state` is recommended so the user understands why their session was disabled (e.g., "Wi-Fi paused — low battery").
-- Treat `battery_percent` as approximate. A piecewise LiFePO4 SoC curve is planned; until then, the value at any specific voltage is a best estimate, not a fuel-gauge reading.
-- The transition voltages in firmware do not yet line up with the spec's "25 % / 15 % / 10 %" thresholds — the dashboard may show ~50 % when `battery_state` flips to `warning`. This is a known firmware-side mismatch.
+Battery notes:
+- `battery_percent` is currently a linear estimate from voltage
+- current code maps 11.6 V to 0% and 13.9 V to 100%
+- this is not yet calibrated to the thesis percentage threshold table
+- `battery_state` is more useful for explaining why a service is disabled
+
+AC fields published by the PZEM task:
+- `ac_voltage_v`
+- `ac_current_a`
+- `ac_power_w`
+- `ac_energy_wh`
+- `ac_energy_wh_today`
+
+AC notes:
+- current firmware uses PZEM-004T v3.0 Modbus RTU
+- AC fields are already upserted by firmware
+- `ac_energy_wh_today` is a raw input for estimated CO2 savings
 
 ### `port_state`
 
-One row per `(station_id, port_key)`. Currently populated by:
-- USB ports (`usb_a_1`, `usb_a_2`, `usb_c_1`, `usb_c_2`) — INA219 sensors, event-driven Supabase sync on status flip plus 30 s heartbeat
-- Outlet (`outlet`) — **only the manual `/ports` toggle**; the PZEM-004T AC reader runs but its data is not yet upserted into `port_state` or any other table
+One row per `(station_id, port_key)`.
+
+Expected port keys:
+- `usb_a_1`
+- `usb_a_2`
+- `usb_c_1`
+- `usb_c_2`
+- `outlet`
+
+USB port rows are populated by:
+- INA219 status sync task
+- manual `/ports` test UI
+
+Current USB sensor upsert includes:
+- `station_id`
+- `port_key`
+- `status`
+- `daily_in_use_seconds`
+
+Current USB sensor upsert does not include:
+- `current_ma`
+- `bus_voltage_v`
+
+Those columns exist in the schema and the ESP32 can read them locally, but the current event-driven Supabase payload does not send them.
+
+Outlet row is populated by:
+- PZEM power threshold logic
+- manual `/ports` test UI
+
+Current outlet rule:
+- `in_use` when `ac_power_w > 1.0`
+- `available` otherwise
 
 Hardware caveat:
-- The USB-C INA219 boards on the current PCB rev (addresses 0x40 and 0x41) are physically faulty. The firmware skips them on the live `/port-occupied` page and the per-row sync. USB-C entries on the dashboard reflect only the manual `/ports` toggle until the PCB is fixed.
+- USB-C INA219 hardware is faulty on the current PCB revision
+- USB-C dashboard values may be missing/stale until the hardware is fixed
 
-Future telemetry the PWA should be ready for (not yet present):
-- AC voltage, current, power, cumulative energy from the PZEM-004T (final schema TBD — likely `station_state` extension or a new table)
-- Real eco-metric values (`today_energy_wh`, `today_co2_saved_g`) once `eco_metrics.c` is enabled — until then the PWA is expected to compute its own client-side estimate
+## Estimated CO2 Contract
+
+Eco metrics are estimated CO2 savings.
+
+The firmware does not need to calculate final CO2 savings. The PWA calculates it from raw telemetry.
+
+Firmware raw inputs:
+- USB-A `daily_in_use_seconds`
+- USB-C `daily_in_use_seconds`
+- `ac_energy_wh_today`
+
+PWA formula:
+
+```text
+(10 * USB-A hours + 15 * USB-C hours + acEnergyWhToday) * 0.70 = grams CO2 saved
+```
+
+Recommended interpretation:
+- `USB-A hours` = sum of USB-A port `daily_in_use_seconds` divided by 3600
+- `USB-C hours` = sum of USB-C port `daily_in_use_seconds` divided by 3600
+- `acEnergyWhToday` = latest `station_state.ac_energy_wh_today`
+- result is displayed as estimated grams CO2 saved
+
+`main/eco_metrics.c` is disabled/stubbed and is not part of the current PWA calculation path.
+
+## Battery/Service State Display Guidance
+
+The PWA should be prepared to explain service availability using firmware state:
+
+| Firmware/input state | Recommended user-facing meaning |
+|---|---|
+| `battery_state = normal` | full service available if RFID/session conditions allow |
+| `battery_state = warning` | user Wi-Fi may be disabled when threshold enforcement is enabled |
+| `battery_state = critical` | charging ports blocked when threshold enforcement is enabled |
+| `battery_state = wake_up` | station is recovering, telemetry only |
+| `battery_state = charging_on` | charging ports can resume, user Wi-Fi still recovering |
+
+Current caveat:
+- local `.env` sets `BATTERY_SENSOR_ENFORCE_THRESHOLDS=0`, so state labels may publish without the firmware actually disabling AP/ports in dev builds
+
+## RFID/User Wi-Fi Caveat
+
+Expected thesis behavior:
+- RFID gates charging ports and user Wi-Fi
+
+Current firmware behavior:
+- RFID gates charging power GPIOs only
+- user Wi-Fi is not currently linked to RFID presence
+
+PWA implication:
+- do not assume a valid RFID card is required for a Wi-Fi session unless firmware is updated to enforce that rule
+
+## Supabase RPC Expectations
+
+The PWA/backend should provide or preserve:
+- `claim_session_link(session_token, installation_id)`
+- `resolve_installation_session(installation_id)`
+- `cleanup_old_sessions()` if used operationally
+
+The SQL files in this repo document the intended tables and RPC signatures, but the live Supabase project remains the operational source for deployed RPC bodies and policies.
+
+## Recommended PWA States
+
+The dashboard should handle:
+- linked and active
+- linked but disconnected
+- linked but expired
+- not linked yet
+- station telemetry stale/offline
+- battery low/service unavailable
+- no current Supabase row
+- dev reset/reboot behavior during testing
+
+## Manual Recovery
+
+When a user missed the first linking click:
+
+1. PWA shows unresolved state.
+2. User connects to `SOLAR CONNECT`.
+3. User opens `http://192.168.4.1/`.
+4. ESP32 local portal provides the current session/link path.
+5. PWA claims the session token and stores/uses `installation_id`.
+
+This path avoids relying on the OS captive portal popup reopening automatically.
