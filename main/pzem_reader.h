@@ -9,13 +9,12 @@ extern "C" {
 #endif
 
 /*
- * PZEM-004T v1.0 AC power monitor (legacy Peacefair binary protocol).
+ * PZEM-004T v3.0 AC power monitor (Modbus-RTU protocol).
  *
- * The v1 module does NOT speak Modbus. It uses 7-byte command / 7-byte
- * response framing with a 4-byte IP-style device address (default
- * 192.168.1.1). Each metric (voltage, current, power, energy) requires a
- * separate query, so a single pzem_reader_read() issues four sequential
- * frames over UART2.
+ * One read transaction = one Modbus "read input registers" frame to slave
+ * 0xF8 (general broadcast), returning 10 registers (voltage, current,
+ * power, energy, frequency, power factor, alarm). All four user-visible
+ * fields are populated from a single 25-byte response.
  *
  * Wiring:
  *   ESP32 GPIO 17 (TX2) -> PZEM RX

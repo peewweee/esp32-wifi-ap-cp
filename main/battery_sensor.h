@@ -78,7 +78,7 @@ extern "C" {
  * Percentage is linearly mapped between FULL_V and EMPTY_V so the
  * dashboard's "%" matches the table above. */
 #ifndef BATTERY_VOLTAGE_FULL_V
-#define BATTERY_VOLTAGE_FULL_V           13.6f
+#define BATTERY_VOLTAGE_FULL_V           13.9f
 #endif
 #ifndef BATTERY_VOLTAGE_EMPTY_V
 #define BATTERY_VOLTAGE_EMPTY_V          11.6f

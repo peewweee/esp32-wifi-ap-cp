@@ -101,6 +101,10 @@ create table if not exists public.station_state (
     battery_voltage_v numeric,
     battery_raw_mv    integer,
     battery_state     text,
+    ac_voltage_v      numeric,
+    ac_current_a      numeric,
+    ac_power_w        numeric,
+    ac_energy_wh      integer,
     updated_at        timestamptz not null default now()
 );
 
