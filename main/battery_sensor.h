@@ -100,6 +100,25 @@ extern "C" {
 #define BATTERY_DEBOUNCE_SAMPLES         6
 #endif
 
+/* Minimum voltage for a reading to be considered real and pushed to
+ * Supabase. Below this we assume the ESP32 is either still booting
+ * (caps not charged yet) or has just been unplugged and the input rail
+ * is decaying — in either case the ADC samples noise that the linear
+ * curve would map to "0 %", and we don't want that landing in
+ * station_state.battery_percent.
+ *
+ * 5 V was picked because:
+ *   - Real LiFePO4 readings live in 11.6-13.6 V land
+ *   - Even a deeply-discharged 12 V battery does not fall to 5 V
+ *   - The ESP32 itself runs off 3.3 V LDO; any rail capable of running
+ *     the chip will keep the divider node well above 5 V too
+ *
+ * Combined with the dashboard's staleness check, this gives a clean
+ * "Offline" UX when the ESP32 is unplugged. */
+#ifndef BATTERY_MIN_VALID_VOLTAGE_V
+#define BATTERY_MIN_VALID_VOLTAGE_V      5.0f
+#endif
+
 /* On boot, take this many quick samples (with shorter delay) before
  * deciding which state to enter. Avoids reacting to a single noisy
  * reading at power-up. */

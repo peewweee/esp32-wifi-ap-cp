@@ -297,7 +297,15 @@ static void battery_task(void *pvParameters)
                      (double)r.voltage_v, (double)r.percent,
                      battery_state_name(r.state));
 #if BATTERY_SENSOR_SUPABASE_SYNC_ENABLED
-            battery_sync_to_supabase(&r);
+            if (r.voltage_v >= BATTERY_MIN_VALID_VOLTAGE_V) {
+                battery_sync_to_supabase(&r);
+            } else {
+                ESP_LOGW(TAG,
+                         "skipping Supabase upsert: V=%.2f below %.1f V floor "
+                         "(power-loss artifact or boot transient)",
+                         (double)r.voltage_v,
+                         (double)BATTERY_MIN_VALID_VOLTAGE_V);
+            }
 #endif
         } else {
             ESP_LOGW(TAG, "battery read failed: %s", esp_err_to_name(err));
