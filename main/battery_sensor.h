@@ -58,12 +58,13 @@ extern "C" {
 /* GPIO 32 = ADC1 channel 4 on ESP32. */
 #define BATTERY_SENSOR_GPIO              32
 
-/* (R1 + R2) / R2. Current PCB uses 100 kohm (top) + 22 kohm (bottom),
- * giving 122 / 22 = 5.5454. 12 V battery -> ~2.16 V at GPIO 32, with
- * headroom up to ~18 V before the ADC pin clips at 3.3 V.
- * If you change the resistors, recompute and update this value. */
+/* (R1 + R2) / R2. Nominal value for 100 kohm + 22 kohm is 122/22 = 5.5454,
+ * but the actual ratio drifts with resistor tolerance and ADC offset.
+ * Calibrated empirically: at a measured 13.02 V across the divider input,
+ * the ADC pin reads 2.30 V, so the effective ratio is 13.02 / 2.30 = 5.661.
+ * If you swap the resistors or move the wiring, re-measure and update. */
 #ifndef BATTERY_VOLTAGE_DIVIDER_RATIO
-#define BATTERY_VOLTAGE_DIVIDER_RATIO    5.5454f
+#define BATTERY_VOLTAGE_DIVIDER_RATIO    5.661f
 #endif
 
 /* Battery curve calibrated to the project's threshold table:
@@ -78,7 +79,7 @@ extern "C" {
  * Percentage is linearly mapped between FULL_V and EMPTY_V so the
  * dashboard's "%" matches the table above. */
 #ifndef BATTERY_VOLTAGE_FULL_V
-#define BATTERY_VOLTAGE_FULL_V           13.9f
+#define BATTERY_VOLTAGE_FULL_V           13.02f
 #endif
 #ifndef BATTERY_VOLTAGE_EMPTY_V
 #define BATTERY_VOLTAGE_EMPTY_V          11.6f
